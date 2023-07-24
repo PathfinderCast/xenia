@@ -115,12 +115,20 @@ std::vector<XCONTENT_AGGREGATE_DATA> ContentManager::ListContent(
       content_data.device_id = device_id;
       content_data.content_type = content_type;
       content_data.set_display_name(xe::path_to_utf16(file_info.name));
+      //435A07D7 - Mushihimesama Futari 1.5
       if (file_info.name.filename() == "496F816DD4B53DAEFF931838B6C69831AAD7663043")
         content_data.set_display_name(u"虫姫さまふたり　ブラックレーベル");
       if (file_info.name.filename() == "9893A78CA6062B935BD1F53EA43CFD546B7246DF43")
         content_data.set_display_name(u"虫姫さまふたり　ver1.01");
+      //435A07E3 - Mushihimesama HD
       if (file_info.name.filename() == "54EE4F5841C0CC45B07AB01E85B35FD8FC743D0243")
         content_data.set_display_name(u"虫姫さま ver 1.5");
+      //435A07DE - Muchi Muchi Pork & Pink Sweets
+      if (file_info.name.filename() == "A147F6AB5833AFC6F68A7BBCDE3F28AFE6E9AF2E43")
+        content_data.set_display_name(u"むちむちポークケイブ祭りバージョン");
+      //435A07D9 - Deathsmiles 2 X
+      if (file_info.name.filename() == "9EFE6600D8F2792423189C6250881FEEFD807D7E43")
+        content_data.set_display_name(u"アレンジミュージック");
       content_data.set_file_name(xe::path_to_utf8(file_info.name));
       content_data.title_id = title_id;
       result.emplace_back(std::move(content_data));
