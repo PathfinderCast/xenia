@@ -52,9 +52,9 @@ DECLARE_string(hid);
 
 DECLARE_bool(guide_button);
 
-DECLARE_bool(d3d12_readback_resolve);
+DECLARE_bool(clear_memory_page_state);
 
-DECLARE_bool(d3d12_clear_memory_page_state);
+DECLARE_bool(d3d12_readback_resolve);
 
 DEFINE_bool(fullscreen, false, "Whether to launch the emulator in fullscreen.",
             "Display");
@@ -881,8 +881,9 @@ void EmulatorWindow::FileOpen() {
   file_picker->set_multi_selection(false);
   file_picker->set_title("Select Content Package");
   file_picker->set_extensions({
-      {"Supported Files", "*.iso;*.xex;*.*"},
+      {"Supported Files", "*.iso;*.xex;*.zar;*.*"},
       {"Disc Image (*.iso)", "*.iso"},
+      {"Disc Archive (*.zar)", "*.zar"},
       {"Xbox Executable (*.xex)", "*.xex"},
       //{"Content Package (*.xcp)", "*.xcp" },
       {"All Files (*.*)", "*.*"},
@@ -1100,6 +1101,12 @@ void EmulatorWindow::UpdateTitle() {
   if (patcher && patcher->IsAnyPatchApplied()) {
     sb.Append(u8" [Patches Applied]");
   }
+
+  patcher::PluginLoader* pluginloader = emulator()->plugin_loader();
+  if (pluginloader && pluginloader->IsAnyPluginLoaded()) {
+    sb.Append(u8" [Plugins Loaded]");
+  }
+
   window_->SetTitle(sb.to_string_view());
 }
 
@@ -1259,7 +1266,7 @@ EmulatorWindow::ControllerHotKey EmulatorWindow::ProcessControllerHotkey(
       ToggleGPUSetting(gpu_cvar::ClearMemoryPageState);
 
       // Assume the user wants ClearCaches as well
-      if (cvars::d3d12_clear_memory_page_state) {
+      if (cvars::clear_memory_page_state) {
         GpuClearCaches();
       }
 
@@ -1401,8 +1408,8 @@ void EmulatorWindow::GamepadHotKeys() {
 void EmulatorWindow::ToggleGPUSetting(gpu_cvar value) {
   switch (value) {
     case gpu_cvar::ClearMemoryPageState:
-      D3D12SaveGPUSetting(D3D12GPUSetting::ClearMemoryPageState,
-                          !cvars::d3d12_clear_memory_page_state);
+      CommonSaveGPUSetting(CommonGPUSetting::ClearMemoryPageState,
+                          !cvars::clear_memory_page_state);
       break;
     case gpu_cvar::ReadbackResolve:
       D3D12SaveGPUSetting(D3D12GPUSetting::ReadbackResolve,
@@ -1427,10 +1434,6 @@ bool EmulatorWindow::IsUseNexusForGameBarEnabled() {
 #else
   return false;
 #endif
-}
-
-std::string EmulatorWindow::BoolToString(bool value) {
-  return std::string(value ? "true" : "false");
 }
 
 void EmulatorWindow::DisplayHotKeysConfig() {
@@ -1472,14 +1475,16 @@ void EmulatorWindow::DisplayHotKeysConfig() {
   msg.insert(0, msg_passthru);
   msg += "\n";
 
-  msg += "Readback Resolve: " + BoolToString(cvars::d3d12_readback_resolve);
+  msg += "Readback Resolve: " +
+         xe::string_util::BoolToString(cvars::d3d12_readback_resolve);
   msg += "\n";
 
   msg += "Clear Memory Page State: " +
-         BoolToString(cvars::d3d12_clear_memory_page_state);
+         xe::string_util::BoolToString(cvars::clear_memory_page_state);
   msg += "\n";
 
-  msg += "Controller Hotkeys: " + BoolToString(cvars::controller_hotkeys);
+  msg += "Controller Hotkeys: " +
+         xe::string_util::BoolToString(cvars::controller_hotkeys);
 
   imgui_drawer_.get()->ClearDialogs();
   xe::ui::ImGuiDialog::ShowMessageBox(imgui_drawer_.get(), "Controller Hotkeys",
