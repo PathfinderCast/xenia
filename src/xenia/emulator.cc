@@ -922,6 +922,25 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
     }
   }
 
+  if (xam) {
+    const std::filesystem::path launch_data_dir = "launch_data";
+    const std::filesystem::path file_path =
+        launch_data_dir /
+        fmt::format("{:08X}_launch_data.bin", title_id_.value());
+
+    auto file = xe::filesystem::OpenFile(file_path, "rb");
+    if (file) {
+      XELOGI("Found launch_data for {}", title_name_);
+      const uint64_t file_size = std::filesystem::file_size(file_path);
+      xam->loader_data().launch_data_present = true;
+      xam->loader_data().launch_data.resize(file_size);
+      fread(xam->loader_data().launch_data.data(), file_size, 1, file);
+
+      fclose(file);
+    }
+  }
+
+
   // Try and load the resource database (xex only).
   if (module->title_id()) {
     auto title_id = fmt::format("{:08X}", module->title_id());
@@ -959,6 +978,26 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
       }
       XELOGI("----------------- END OF ACHIEVEMENTS ----------------");
 
+      XELOGI("-------------------- PROPERTIES --------------------");
+      const std::vector<kernel::util::XdbfPropertyTableEntry> properties_list =
+          db.GetProperties();
+
+      for (const kernel::util::XdbfPropertyTableEntry& entry :
+           properties_list) {
+        std::string label = db.GetStringTableEntry(language, entry.string_id);
+        XELOGI("{:08X} - {} - {}", entry.id, label, entry.data_size);
+      }
+      XELOGI("----------------- END OF PROPERTIES ----------------");
+
+      XELOGI("-------------------- CONTEXTS --------------------");
+      const std::vector<kernel::util::XdbfContextTableEntry> contexts_list =
+          db.GetContexts();
+
+      for (const kernel::util::XdbfContextTableEntry& entry : contexts_list) {
+        std::string label = db.GetStringTableEntry(language, entry.string_id);
+        XELOGI("{:08X} - {} - {}", entry.id, label, entry.unk2);
+      }
+      XELOGI("----------------- END OF CONTEXTS ----------------");
       auto icon_block = db.icon();
       if (icon_block) {
         display_window_->SetIcon(icon_block.buffer, icon_block.size);
