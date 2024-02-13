@@ -53,8 +53,8 @@
 #include "xenia/vfs/devices/disc_zarchive_device.h"
 #include "xenia/vfs/devices/host_path_device.h"
 #include "xenia/vfs/devices/null_device.h"
-#include "xenia/vfs/virtual_file_system.h"
 #include "xenia/vfs/devices/xcontent_container_device.h"
+#include "xenia/vfs/virtual_file_system.h"
 
 #if XE_ARCH_AMD64
 #include "xenia/cpu/backend/x64/x64_backend.h"
@@ -272,7 +272,6 @@ X_STATUS Emulator::Setup(
     }
   }
 
-
   // Initialize emulator fallback exception handling last.
   ExceptionHandler::Install(Emulator::ExceptionCallbackThunk, this);
 
@@ -309,12 +308,12 @@ const std::unique_ptr<vfs::Device> Emulator::CreateVfsDeviceBasedOnPath(
         mount_path, parent_path, !cvars::allow_game_relative_writes);
   } else if (extension == ".zar") {
     return std::make_unique<vfs::DiscZarchiveDevice>(mount_path, path);
-  }
-  else if (extension == ".7z" || extension == ".zip" || extension == ".rar" ||
+  } else if (extension == ".7z" || extension == ".zip" || extension == ".rar" ||
              extension == ".tar" || extension == ".gz") {
     xe::ShowSimpleMessageBox(
         xe::SimpleMessageBoxType::Error,
-        fmt::format("Unsupported format!"
+        fmt::format(
+            "Unsupported format!"
             "Xenia does not support running software in an archived format."));
   }
   return std::make_unique<vfs::DiscImageDevice>(mount_path, path);
@@ -335,13 +334,13 @@ X_STATUS Emulator::MountPath(const std::filesystem::path& path,
     return X_STATUS_NO_SUCH_FILE;
   }
 
-  file_system_->UnregisterSymbolicLink("d:");
-  file_system_->UnregisterSymbolicLink("game:");
+  file_system_->UnregisterSymbolicLink(kDefaultPartitonSymbolicLink);
+  file_system_->UnregisterSymbolicLink(kDefaultGameSymbolicLink);
   file_system_->UnregisterSymbolicLink("plugins:");
 
   // Create symlinks to the device.
-  file_system_->RegisterSymbolicLink("game:", mount_path);
-  file_system_->RegisterSymbolicLink("d:", mount_path);
+  file_system_->RegisterSymbolicLink(kDefaultGameSymbolicLink, mount_path);
+  file_system_->RegisterSymbolicLink(kDefaultPartitonSymbolicLink, mount_path);
 
   return X_STATUS_SUCCESS;
 }
@@ -382,7 +381,9 @@ X_STATUS Emulator::LaunchXexFile(const std::filesystem::path& path) {
 
   // Launch the game.
   auto fs_path = "game:\\" + xe::path_to_utf8(file_name);
-  return CompleteLaunch(path, fs_path);
+  X_STATUS result = CompleteLaunch(path, fs_path);
+  kernel_state_->deployment_type_ = XDeploymentType::kHardDrive;
+  return result;
 }
 
 X_STATUS Emulator::LaunchDiscImage(const std::filesystem::path& path) {
@@ -392,7 +393,7 @@ X_STATUS Emulator::LaunchDiscImage(const std::filesystem::path& path) {
   if (result == X_STATUS_NOT_FOUND && !cvars::launch_module.empty()) {
     return LaunchDefaultModule(path);
   }
-
+  kernel_state_->deployment_type_ = XDeploymentType::kOpticalDisc;
   return result;
 }
 
@@ -403,7 +404,7 @@ X_STATUS Emulator::LaunchDiscArchive(const std::filesystem::path& path) {
   if (result == X_STATUS_NOT_FOUND && !cvars::launch_module.empty()) {
     return LaunchDefaultModule(path);
   }
-
+  kernel_state_->deployment_type_ = XDeploymentType::kOpticalDisc;
   return result;
 }
 
@@ -414,15 +415,16 @@ X_STATUS Emulator::LaunchStfsContainer(const std::filesystem::path& path) {
   if (result == X_STATUS_NOT_FOUND && !cvars::launch_module.empty()) {
     return LaunchDefaultModule(path);
   }
-
+  kernel_state_->deployment_type_ = XDeploymentType::kGoD;
   return result;
 }
 
 X_STATUS Emulator::LaunchDefaultModule(const std::filesystem::path& path) {
   cvars::launch_module = "";
   std::string module_path = FindLaunchModule();
-
-  return CompleteLaunch(path, module_path);
+  X_STATUS result = CompleteLaunch(path, module_path);
+  kernel_state_->deployment_type_ = XDeploymentType::kHardDrive;
+  return result;
 }
 
 X_STATUS Emulator::InstallContentPackage(const std::filesystem::path& path) {
@@ -699,9 +701,12 @@ bool Emulator::ExceptionCallback(Exception* ex) {
   std::string crash_msg;
   crash_msg.append("==== CRASH DUMP ====\n");
   crash_msg.append(fmt::format("Thread ID (Host: 0x{:08X} / Guest: 0x{:08X})\n",
-         current_thread->thread()->system_id(), current_thread->thread_id()));
-  crash_msg.append(fmt::format("Thread Handle: 0x{:08X}\n", current_thread->handle()));
-  crash_msg.append(fmt::format("PC: 0x{:08X}\n",
+                               current_thread->thread()->system_id(),
+                               current_thread->thread_id()));
+  crash_msg.append(
+      fmt::format("Thread Handle: 0x{:08X}\n", current_thread->handle()));
+  crash_msg.append(
+      fmt::format("PC: 0x{:08X}\n",
                   guest_function->MapMachineCodeToGuestAddress(ex->pc())));
   crash_msg.append("Registers:\n");
   for (int i = 0; i < 32; i++) {
@@ -795,6 +800,32 @@ void Emulator::RemoveGameConfigLoadCallback(GameConfigLoadCallback* callback) {
 
 std::string Emulator::FindLaunchModule() {
   std::string path("game:\\");
+
+  auto xam = kernel_state()->GetKernelModule<kernel::xam::XamModule>("xam.xex");
+
+  if (!xam->loader_data().launch_path.empty()) {
+    std::string symbolic_link_path;
+    if (kernel_state_->file_system()->FindSymbolicLink(kDefaultGameSymbolicLink,
+                                                       symbolic_link_path)) {
+      std::filesystem::path file_path = symbolic_link_path;
+      // Remove previous symbolic links.
+      // Some titles can provide root within specific directory.
+      kernel_state_->file_system()->UnregisterSymbolicLink(
+          kDefaultPartitonSymbolicLink);
+      kernel_state_->file_system()->UnregisterSymbolicLink(
+          kDefaultGameSymbolicLink);
+
+      file_path /= std::filesystem::path(xam->loader_data().launch_path);
+
+      kernel_state_->file_system()->RegisterSymbolicLink(
+          kDefaultPartitonSymbolicLink,
+          xe::path_to_utf8(file_path.parent_path()));
+      kernel_state_->file_system()->RegisterSymbolicLink(
+          kDefaultGameSymbolicLink, xe::path_to_utf8(file_path.parent_path()));
+
+      return xe::path_to_utf8(file_path);
+    }
+  }
 
   if (!cvars::launch_module.empty()) {
     return path + cvars::launch_module;
@@ -921,25 +952,6 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
       title_version_ = format_version(title_version);
     }
   }
-
-  if (xam) {
-    const std::filesystem::path launch_data_dir = "launch_data";
-    const std::filesystem::path file_path =
-        launch_data_dir /
-        fmt::format("{:08X}_launch_data.bin", title_id_.value());
-
-    auto file = xe::filesystem::OpenFile(file_path, "rb");
-    if (file) {
-      XELOGI("Found launch_data for {}", title_name_);
-      const uint64_t file_size = std::filesystem::file_size(file_path);
-      xam->loader_data().launch_data_present = true;
-      xam->loader_data().launch_data.resize(file_size);
-      fread(xam->loader_data().launch_data.data(), file_size, 1, file);
-
-      fclose(file);
-    }
-  }
-
 
   // Try and load the resource database (xex only).
   if (module->title_id()) {
