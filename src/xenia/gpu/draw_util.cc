@@ -946,7 +946,7 @@ bool GetResolveInfo(const RegisterFile& regs, const Memory& memory,
   auto fetch = regs.Get<xenos::xe_gpu_vertex_fetch_t>(
       XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0);
   if (fetch.type != xenos::FetchConstantType::kVertex || fetch.size != 3 * 2) {
-    XELOGE("Unsupported resolve vertex buffer format");
+    XELOGI("Unsupported resolve vertex buffer format");
     assert_always();
     return false;
   }
@@ -1180,7 +1180,7 @@ bool GetResolveInfo(const RegisterFile& regs, const Memory& memory,
                                   rb_copy_dest_pitch.copy_dest_pitch, bpp_log2);
     }
   } else {
-    XELOGE("Tried to resolve to format {}, which is not a ColorFormat",
+    XELOGI("Tried to resolve to format {}, which is not a ColorFormat",
            FormatInfo::GetName(dest_format));
     copy_dest_extent_start = copy_dest_base_adjusted;
     copy_dest_extent_end = copy_dest_base_adjusted;

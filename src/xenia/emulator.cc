@@ -119,28 +119,6 @@ Emulator::Emulator(const std::filesystem::path& command_line,
       paused_(false),
       restoring_(false),
       restore_fence_() {
-#if XE_PLATFORM_WIN32 == 1
-  // Show a disclaimer that links to the quickstart
-  // guide the first time they ever open the emulator
-  uint64_t persistent_flags = GetPersistentEmulatorFlags();
-  if (!(persistent_flags & EmulatorFlagDisclaimerAcknowledged)) {
-    if ((MessageBoxW(
-             nullptr,
-             L"DISCLAIMER: Xenia is not for enabling illegal activity, and "
-             "support is unavailable for illegally obtained software.\n\n"
-             "Please respect this policy as no further reminders will be "
-             "given.\n\nThe quickstart guide explains how to use digital or "
-             "physical games from your Xbox 360 console.\n\nWould you like "
-             "to open it?",
-             L"Xenia", MB_YESNO | MB_ICONQUESTION) == IDYES)) {
-      LaunchWebBrowser(
-          "https://github.com/xenia-project/xenia/wiki/"
-          "Quickstart#how-to-rip-games");
-    }
-    SetPersistentEmulatorFlags(persistent_flags |
-                               EmulatorFlagDisclaimerAcknowledged);
-  }
-#endif
 }
 
 Emulator::~Emulator() {
@@ -339,48 +317,6 @@ const std::unique_ptr<vfs::Device> Emulator::CreateVfsDeviceBasedOnPath(
             "Xenia does not support running software in an archived format."));
   }
   return std::make_unique<vfs::DiscImageDevice>(mount_path, path);
-}
-
-uint64_t Emulator::GetPersistentEmulatorFlags() {
-#if XE_PLATFORM_WIN32 == 1
-  uint64_t value = 0;
-  DWORD value_size = sizeof(value);
-  HKEY xenia_hkey = nullptr;
-  LSTATUS lstat =
-      RegOpenKeyA(HKEY_CURRENT_USER, "SOFTWARE\\Xenia", &xenia_hkey);
-  if (!xenia_hkey) {
-    // let the Set function create the key and initialize it to 0
-    SetPersistentEmulatorFlags(0ULL);
-    return 0ULL;
-  }
-
-  lstat = RegQueryValueExA(xenia_hkey, "XEFLAGS", 0, NULL,
-                           reinterpret_cast<LPBYTE>(&value), &value_size);
-  RegCloseKey(xenia_hkey);
-  if (lstat) {
-    return 0ULL;
-  }
-  return value;
-#else
-  return EmulatorFlagDisclaimerAcknowledged;
-#endif
-}
-void Emulator::SetPersistentEmulatorFlags(uint64_t new_flags) {
-#if XE_PLATFORM_WIN32 == 1
-  uint64_t value = new_flags;
-  DWORD value_size = sizeof(value);
-  HKEY xenia_hkey = nullptr;
-  LSTATUS lstat =
-      RegOpenKeyA(HKEY_CURRENT_USER, "SOFTWARE\\Xenia", &xenia_hkey);
-  if (!xenia_hkey) {
-    lstat = RegCreateKeyA(HKEY_CURRENT_USER, "SOFTWARE\\Xenia", &xenia_hkey);
-  }
-
-  lstat = RegSetValueExA(xenia_hkey, "XEFLAGS", 0, REG_QWORD,
-                         reinterpret_cast<const BYTE*>(&value), 8);
-  RegFlushKey(xenia_hkey);
-  RegCloseKey(xenia_hkey);
-#endif
 }
 
 X_STATUS Emulator::MountPath(const std::filesystem::path& path,
