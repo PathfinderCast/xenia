@@ -14,6 +14,7 @@
 #include "xenia/kernel/kernel_flags.h"
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/util/shim_utils.h"
+#include "xenia/kernel/xam/xam_content_device.h"
 #include "xenia/kernel/xam/xam_private.h"
 #include "xenia/ui/imgui_dialog.h"
 #include "xenia/ui/imgui_drawer.h"
@@ -21,10 +22,13 @@
 #include "xenia/ui/windowed_app_context.h"
 #include "xenia/xbox.h"
 
+DEFINE_bool(storage_selection_dialog, false,
+            "Show storage device selection dialog when the game requests it.",
+            "UI");
+
 namespace xe {
 namespace kernel {
 namespace xam {
-
 // TODO(gibbed): This is all one giant WIP that seems to work better than the
 // previous immediate synchronous completion of dialogs.
 //
@@ -526,12 +530,43 @@ dword_result_t XamShowDeviceSelectorUI_entry(
     dword_t user_index, dword_t content_type, dword_t content_flags,
     qword_t total_requested, lpdword_t device_id_ptr,
     pointer_t<XAM_OVERLAPPED> overlapped) {
-  return xeXamDispatchHeadless(
-      [device_id_ptr]() -> X_RESULT {
-        // NOTE: 0x00000001 is our dummy device ID from xam_content.cc
-        *device_id_ptr = 0x00000001;
-        return X_ERROR_SUCCESS;
-      },
+  std::vector<const DummyDeviceInfo*> devices = ListStorageDevices();
+
+  if (cvars::headless || !cvars::storage_selection_dialog) {
+    // Default to the first storage device (HDD) if headless.
+    return xeXamDispatchHeadless(
+        [device_id_ptr, devices]() -> X_RESULT {
+          if (devices.empty()) return X_ERROR_CANCELLED;
+
+          const DummyDeviceInfo* device_info = devices.front();
+          *device_id_ptr = static_cast<uint32_t>(device_info->device_id);
+          return X_ERROR_SUCCESS;
+        },
+        overlapped);
+  }
+
+  auto close = [device_id_ptr, devices](MessageBoxDialog* dialog) -> X_RESULT {
+    uint32_t button = dialog->chosen_button();
+    if (button >= devices.size()) return X_ERROR_CANCELLED;
+
+    const DummyDeviceInfo* device_info = devices.at(button);
+    *device_id_ptr = static_cast<uint32_t>(device_info->device_id);
+    return X_ERROR_SUCCESS;
+  };
+
+  std::string title = "Select storage device";
+  std::string desc = "";
+
+  cxxopts::OptionNames buttons;
+  for (auto& device_info : devices) {
+    buttons.push_back(to_utf8(device_info->name));
+  }
+  buttons.push_back("Cancel");
+
+  const Emulator* emulator = kernel_state()->emulator();
+  ui::ImGuiDrawer* imgui_drawer = emulator->imgui_drawer();
+  return xeXamDispatchDialog<MessageBoxDialog>(
+      new MessageBoxDialog(imgui_drawer, title, desc, buttons, 0), close,
       overlapped);
 }
 DECLARE_XAM_EXPORT1(XamShowDeviceSelectorUI, kUI, kImplemented);
