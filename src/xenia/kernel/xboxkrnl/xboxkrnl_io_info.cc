@@ -205,6 +205,31 @@ dword_result_t NtSetInformationFile_entry(
   uint32_t out_length;
 
   switch (info_class) {
+    case XFileBasicInformation: {
+      auto info = info_ptr.as<X_FILE_BASIC_INFORMATION*>();
+
+      bool basic_result = true;
+      if (info->creation_time) {
+        basic_result &= file->entry()->SetCreateTimestamp(info->creation_time);
+      }
+
+      if (info->last_access_time) {
+        basic_result &=
+            file->entry()->SetAccessTimestamp(info->last_access_time);
+      }
+
+      if (info->last_write_time) {
+        basic_result &= file->entry()->SetWriteTimestamp(info->last_write_time);
+      }
+
+      basic_result &= file->entry()->SetAttributes(info->attributes);
+      if (!basic_result) {
+        result = X_STATUS_UNSUCCESSFUL;
+      }
+
+      out_length = sizeof(*info);
+      break;
+    }
     case XFileRenameInformation: {
       auto info = info_ptr.as<X_FILE_RENAME_INFORMATION*>();
       // Compute path, possibly attrs relative.
@@ -225,12 +250,12 @@ dword_result_t NtSetInformationFile_entry(
       break;
     }
     case XFileDispositionInformation: {
-      // Used to set deletion flag. Which we don't support. Probably?
       auto info = info_ptr.as<X_FILE_DISPOSITION_INFORMATION*>();
       bool delete_on_close = info->delete_file ? true : false;
+      file->entry()->SetForDeletion(static_cast<bool>(info->delete_file));
       out_length = 0;
-      XELOGW("NtSetInformationFile ignoring delete on close: {}",
-             delete_on_close);
+      XELOGW("NtSetInformationFile set deleting flag for {} on close to: {}",
+             file->name(), delete_on_close);
       break;
     }
     case XFilePositionInformation: {

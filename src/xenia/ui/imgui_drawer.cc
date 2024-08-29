@@ -467,8 +467,34 @@ void ImGuiDrawer::Draw(UIDrawContext& ui_draw_context) {
   dialog_loop_next_index_ = SIZE_MAX;
 
   if (!notifications_.empty()) {
-    // We only care about drawing next notification.
-    notifications_.at(0)->Draw();
+    std::vector<ui::ImGuiNotification*> guest_notifications = {};
+    std::vector<ui::ImGuiNotification*> host_notifications = {};
+
+    std::copy_if(notifications_.cbegin(), notifications_.cend(),
+                 std::back_inserter(guest_notifications),
+                 [](ui::ImGuiNotification* notification) {
+                   return notification->GetNotificationType() ==
+                          NotificationType::Guest;
+                 });
+
+    std::copy_if(notifications_.cbegin(), notifications_.cend(),
+                 std::back_inserter(host_notifications),
+                 [](ui::ImGuiNotification* notification) {
+                   return notification->GetNotificationType() ==
+                          NotificationType::Host;
+                 });
+
+    if (guest_notifications.size() > 0) {
+      guest_notifications.at(0)->Draw();
+    }
+
+    if (host_notifications.size() > 0) {
+      host_notifications.at(0)->Draw();
+
+      if (host_notifications.size() > 1) {
+        host_notifications.at(0)->SetDeletionPending();
+      }
+    }
   }
 
   ImGui::Render();
