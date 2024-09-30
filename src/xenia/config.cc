@@ -95,6 +95,7 @@ void ReadConfig(const std::filesystem::path& file_path,
   const auto config = ParseConfig(file_path);
 
   //PrintConfigToLog(file_path);
+
   // Loading an actual global config file that exists - if there's no
   // defaults_date in it, it's very old (before updating was added at all, thus
   // all defaults need to be updated).
