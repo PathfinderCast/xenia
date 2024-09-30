@@ -99,7 +99,7 @@ XContentContainerDevice::Result SvodContainerDevice::Read() {
   const uint64_t root_creation_timestamp =
       decode_fat_timestamp(root_data.creation_date, root_data.creation_time);
 
-  auto root_entry = new XContentContainerEntry(this, nullptr, "", &files_);
+  auto root_entry = new XContentContainerEntry(this, nullptr, "", "", &files_);
   root_entry->attributes_ = kFileAttributeDirectory;
   root_entry->access_timestamp_ = root_creation_timestamp;
   root_entry->create_timestamp_ = root_creation_timestamp;
@@ -153,7 +153,9 @@ SvodContainerDevice::Result SvodContainerDevice::ReadEntry(
     return Result::kReadError;
   }
 
-  auto name = std::string(name_buffer.get(), dir_entry.name_length);
+  // Filename is stored as Windows-1252, convert it to UTF-8.
+  auto ansi_name = std::string(name_buffer.get(), dir_entry.name_length);
+  auto name = xe::win1252_to_utf8(ansi_name);
 
   // Read the left node
   if (dir_entry.node_l) {

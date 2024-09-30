@@ -20,10 +20,11 @@ DEFINE_path(
 
 DEFINE_bool(vsync, true, "Enable VSYNC.", "GPU");
 
-DEFINE_uint64(framerate_limit, 60,
+DEFINE_uint64(framerate_limit, 0,
               "Maximum frames per second. 0 = Unlimited frames.\n"
               "Defaults to 60, when set to 0, and VSYNC is enabled.",
               "GPU");
+UPDATE_from_uint64(framerate_limit, 2024, 8, 31, 20, 60);
 
 DEFINE_bool(
     gpu_allow_invalid_fetch_constants, true,
@@ -54,9 +55,10 @@ DEFINE_bool(
     "when MSAA is used with fullscreen passes.",
     "GPU");
 
-DEFINE_int32(query_occlusion_fake_sample_count, 1000,
+DEFINE_int32(query_occlusion_fake_sample_count, 100,
              "If set to -1 no sample counts are written, games may hang. Else, "
              "the sample count of every tile will be incremented on every "
              "EVENT_WRITE_ZPD by this number. Setting this to 0 means "
              "everything is reported as occluded.",
              "GPU");
+UPDATE_from_int32(query_occlusion_fake_sample_count, 2024, 9, 23, 9, 1000);

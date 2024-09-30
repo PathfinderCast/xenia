@@ -10,8 +10,8 @@
 #include "xenia/kernel/xam/content_manager.h"
 
 #include <array>
-#include <set>
 #include <string>
+#include <unordered_set>
 
 #include "third_party/fmt/include/fmt/format.h"
 #include "xenia/base/filesystem.h"
@@ -78,14 +78,33 @@ std::filesystem::path ContentManager::ResolvePackagePath(
     const XCONTENT_AGGREGATE_DATA& data, const uint32_t disc_number) {
   // Content path:
   // content_root/title_id/content_type/data_file_name/
-  auto package_root = ResolvePackageRoot(data.content_type, data.title_id);
-  std::string final_name = xe::string_util::trim(data.file_name());
-  std::filesystem::path package_path = package_root / xe::to_path(final_name);
+  auto get_package_path = [&, data, disc_number](const uint32_t title_id) {
+    auto package_root = ResolvePackageRoot(data.content_type, title_id);
+    std::string final_name = xe::string_util::trim(data.file_name());
+    std::filesystem::path package_path = package_root / xe::to_path(final_name);
 
-  if (disc_number != -1) {
-    package_path /= fmt::format("disc{:03}", disc_number);
+    if (disc_number != -1) {
+      package_path /= fmt::format("disc{:03}", disc_number);
+    }
+    return package_path;
+  };
+
+  if (data.content_type == XContentType::kPublisher) {
+    const std::unordered_set<uint32_t> title_ids =
+        FindPublisherTitleIds(data.title_id);
+
+    for (const auto& title_id : title_ids) {
+      auto package_path = get_package_path(title_id);
+
+      if (!std::filesystem::exists(package_path)) {
+        continue;
+      }
+      return package_path;
+    }
   }
-  return package_path;
+
+  // Default handling for current title
+  return get_package_path(data.title_id);
 }
 
 std::filesystem::path ContentManager::ResolvePackageHeaderPath(
@@ -105,6 +124,40 @@ std::filesystem::path ContentManager::ResolvePackageHeaderPath(
          content_type_str / final_name;
 }
 
+std::unordered_set<uint32_t> ContentManager::FindPublisherTitleIds(
+    uint32_t base_title_id) const {
+  if (base_title_id == kCurrentlyRunningTitleId) {
+    base_title_id = kernel_state_->title_id();
+  }
+  std::unordered_set<uint32_t> title_ids = {};
+
+  std::string publisher_id_regex =
+      fmt::format("^{:04X}.*", static_cast<uint16_t>(base_title_id >> 16));
+  // Get all publisher entries
+  auto publisher_entries =
+      xe::filesystem::FilterByName(xe::filesystem::ListDirectories(root_path_),
+                                   std::regex(publisher_id_regex));
+
+  for (const auto& entry : publisher_entries) {
+    std::filesystem::path path_to_publisher_dir =
+        entry.path / entry.name /
+        fmt::format("{:08X}", XContentType::kPublisher);
+
+    if (!std::filesystem::exists(path_to_publisher_dir)) {
+      continue;
+    }
+
+    title_ids.insert(xe::string_util::from_string<uint32_t>(
+        xe::path_to_utf8(entry.name), true));
+  }
+
+  // Always remove current title. It will be handled differently
+  if (title_ids.count(base_title_id)) {
+    title_ids.erase(base_title_id);
+  }
+  return title_ids;
+}
+
 std::vector<XCONTENT_AGGREGATE_DATA> ContentManager::ListContent(
     uint32_t device_id, XContentType content_type, uint32_t title_id) {
   std::vector<XCONTENT_AGGREGATE_DATA> result;
@@ -113,20 +166,10 @@ std::vector<XCONTENT_AGGREGATE_DATA> ContentManager::ListContent(
     title_id = kernel_state_->title_id();
   }
 
-  std::set<uint32_t> title_ids = {title_id};
+  std::unordered_set<uint32_t> title_ids = {title_id};
 
   if (content_type == XContentType::kPublisher) {
-    std::string publisher_id_regex =
-        fmt::format("^{:04X}.*", static_cast<uint16_t>(title_id >> 16));
-    // Get all publisher entries
-    auto publisher_entries = xe::filesystem::FilterByName(
-        xe::filesystem::ListDirectories(root_path_),
-        std::regex(publisher_id_regex));
-
-    for (const auto& entry : publisher_entries) {
-      title_ids.insert(xe::string_util::from_string<uint32_t>(
-          xe::path_to_utf8(entry.name), true));
-    }
+    title_ids = FindPublisherTitleIds(title_id);
   }
 
   for (const uint32_t& title_id : title_ids) {
@@ -248,7 +291,9 @@ X_RESULT ContentManager::ReadContentHeaderFile(const std::string_view file_name,
     // usually requires title_id to be provided
     // Kinda simple workaround for that, but still assumption
     data.title_id = title_id;
-    data.unk134 = kernel_state_->user_profile(uint32_t(0))->xuid();
+    data.xuid = kernel_state_->xam_state()
+                    ->GetUserProfile(static_cast<uint32_t>(0))
+                    ->xuid();
     return X_STATUS_SUCCESS;
   }
   return X_STATUS_NO_SUCH_FILE;
@@ -373,8 +418,9 @@ X_RESULT ContentManager::DeleteContent(const XCONTENT_AGGREGATE_DATA& data) {
 
 std::filesystem::path ContentManager::ResolveGameUserContentPath() {
   auto title_id = fmt::format("{:08X}", kernel_state_->title_id());
-  auto user_name =
-      xe::to_path(kernel_state_->user_profile(uint32_t(0))->name());
+  auto user_name = xe::to_path(kernel_state_->xam_state()
+                                   ->GetUserProfile(static_cast<uint32_t>(0))
+                                   ->name());
 
   // Per-game per-profile data location:
   // content_root/title_id/profile/user_name

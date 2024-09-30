@@ -31,15 +31,16 @@
 #include "xenia/kernel/xnotifylistener.h"
 #include "xenia/kernel/xobject.h"
 #include "xenia/kernel/xthread.h"
+#include "xenia/ui/imgui_host_notification.h"
+
+#include "third_party/crypto/TinySHA1.hpp"
 
 DEFINE_bool(apply_title_update, true, "Apply title updates.", "Kernel");
 
-DEFINE_uint32(max_signed_profiles, 4,
-              "Limits how many profiles can be assigned. Possible values: 1-4",
-              "Kernel");
-
 DEFINE_uint32(kernel_build_version, 1888, "Define current kernel version",
               "Kernel");
+
+DECLARE_string(cl);
 
 namespace xe {
 namespace kernel {
@@ -63,19 +64,10 @@ KernelState::KernelState(Emulator* emulator)
   shared_kernel_state_ = this;
   processor_ = emulator->processor();
   file_system_ = emulator->file_system();
-
-  app_manager_ = std::make_unique<xam::AppManager>();
-  achievement_manager_ = std::make_unique<AchievementManager>();
-  user_profiles_.emplace(0, std::make_unique<xam::UserProfile>(0));
+  xam_state_ = std::make_unique<xam::XamState>(emulator, this);
 
   InitializeKernelGuestGlobals();
   kernel_version_ = KernelVersion(cvars::kernel_build_version);
-
-  auto content_root = emulator_->content_root();
-  if (!content_root.empty()) {
-    content_root = std::filesystem::absolute(content_root);
-  }
-  content_manager_ = std::make_unique<xam::ContentManager>(this, content_root);
 
   // Hardcoded maximum of 2048 TLS slots.
   tls_bitmap_.Resize(2048);
@@ -87,8 +79,6 @@ KernelState::KernelState(Emulator* emulator)
       kMemoryProtectRead | kMemoryProtectWrite);
 
   xenia_assert(fixed_alloc_worked);
-
-  xam::AppManager::RegisterApps(this, app_manager_.get());
 }
 
 KernelState::~KernelState() {
@@ -107,8 +97,7 @@ KernelState::~KernelState() {
   // Delete all objects.
   object_table_.Reset();
 
-  // Shutdown apps.
-  app_manager_.reset();
+  xam_state_.reset();
 
   assert_true(shared_kernel_state_ == this);
   shared_kernel_state_ = nullptr;
@@ -386,6 +375,25 @@ void KernelState::SetExecutableModule(object_ref<UserModule> module) {
         variable_ptr, executable_module_->path(),
         xboxkrnl::XboxkrnlModule::kExLoadedImageNameSize);
   }
+
+  // Setup the kernel's ExLoadedCommandLine field
+  export_entry = processor()->export_resolver()->GetExportByOrdinal(
+      "xboxkrnl.exe", ordinals::ExLoadedCommandLine);
+  if (export_entry) {
+    char* variable_ptr =
+        memory()->TranslateVirtual<char*>(export_entry->variable_ptr);
+
+    std::string module_name =
+        fmt::format("\"{}.xex\"", executable_module_->name());
+    if (!cvars::cl.empty()) {
+      module_name += " " + cvars::cl;
+    }
+
+    xe::string_util::copy_truncating(
+        variable_ptr, module_name,
+        xboxkrnl::XboxkrnlModule::kExLoadedCommandLineSize);
+  }
+
   // Spin up deferred dispatch worker.
   // TODO(benvanik): move someplace more appropriate (out of ctor, but around
   // here).
@@ -529,53 +537,140 @@ X_RESULT KernelState::FinishLoadingUserModule(
   return result;
 }
 
-X_RESULT KernelState::ApplyTitleUpdate(const object_ref<UserModule> module) {
-  X_RESULT result = X_STATUS_SUCCESS;
+X_RESULT KernelState::ApplyTitleUpdate(
+    const object_ref<UserModule> title_module) {
+  const auto title_updates = FindTitleUpdate(title_module->title_id());
+  if (title_updates.empty()) {
+    return X_STATUS_SUCCESS;
+  }
+
+  auto patch_module = LoadTitleUpdate(&title_updates.front(), title_module);
+  if (!patch_module) {
+    return X_STATUS_SUCCESS;
+  }
+
+  if (!patch_module->xex_module()->is_patch()) {
+    return X_STATUS_UNSUCCESSFUL;
+  }
+
+  if (!IsPatchSignatureProper(title_module, patch_module)) {
+    // First module that is loaded is always main executable. That way we can
+    // prevent random message spam in case of loading/unloading.
+    if (!GetExecutableModule()) {
+      emulator_->display_window()->app_context().CallInUIThread([&]() {
+        new xe::ui::HostNotificationWindow(
+            emulator_->imgui_drawer(), "Warning!",
+            "Title Update signature doesn't match. This can cause unexpected "
+            "issues or crashes!",
+            0);
+      });
+    }
+  }
+
+  return ApplyTitleUpdate(title_module, patch_module);
+}
+
+std::vector<xam::XCONTENT_AGGREGATE_DATA> KernelState::FindTitleUpdate(
+    const uint32_t title_id) const {
   if (!cvars::apply_title_update) {
-    return result;
+    return {};
   }
 
-  std::vector<xam::XCONTENT_AGGREGATE_DATA> tu_list =
-      content_manager()->ListContent(1, xe::XContentType::kInstaller,
-                                     module->title_id());
+  return xam_state_->content_manager()->ListContent(
+      1, xe::XContentType::kInstaller, title_id);
+}
 
-  if (tu_list.empty()) {
-    return result;
-  }
-
+const object_ref<UserModule> KernelState::LoadTitleUpdate(
+    const xam::XCONTENT_AGGREGATE_DATA* title_update,
+    const object_ref<UserModule> module) {
   uint32_t disc_number = -1;
   if (module->is_multi_disc_title()) {
     disc_number = module->disc_number();
   }
-  // TODO(Gliniak): Support for selecting from multiple TUs
-  const xam::XCONTENT_AGGREGATE_DATA& title_update = tu_list.front();
+
   X_RESULT open_status =
-      content_manager()->OpenContent("UPDATE", title_update, disc_number);
+      content_manager()->OpenContent("UPDATE", *title_update, disc_number);
 
   // Use the corresponding patch for the launch module
-  std::filesystem::path patch_xexp = fmt::format("{0}.xexp", module->name());
+  std::filesystem::path patch_xexp;
+
+  std::string mount_path = "";
+  file_system()->FindSymbolicLink("game:", mount_path);
+
+  auto is_relative = std::filesystem::relative(module->path(), mount_path);
+
+  if (is_relative.empty()) {
+    return nullptr;
+  }
+
+  patch_xexp =
+      is_relative.replace_extension(is_relative.extension().string() + "p");
 
   std::string resolved_path = "";
   file_system()->FindSymbolicLink("UPDATE:", resolved_path);
   xe::vfs::Entry* patch_entry = kernel_state()->file_system()->ResolvePath(
       resolved_path + patch_xexp.generic_string());
 
-  if (patch_entry) {
-    const std::string patch_path = patch_entry->absolute_path();
-    XELOGI("Loading XEX patch from {}", patch_path);
-    auto patch_module = object_ref<UserModule>(new UserModule(this));
+  if (!patch_entry) {
+    return nullptr;
+  }
 
-    result = patch_module->LoadFromFile(patch_path);
-    if (result != X_STATUS_SUCCESS) {
-      XELOGE("Failed to load XEX patch, code: {}", result);
-      return X_STATUS_UNSUCCESSFUL;
-    }
+  const std::string patch_path = patch_entry->absolute_path();
+  XELOGI("Loading XEX patch from {}", patch_path);
+  auto patch_module = object_ref<UserModule>(new UserModule(this));
 
-    result = patch_module->xex_module()->ApplyPatch(module->xex_module());
-    if (result != X_STATUS_SUCCESS) {
-      XELOGE("Failed to apply XEX patch, code: {}", result);
-      return X_STATUS_UNSUCCESSFUL;
-    }
+  X_RESULT result = patch_module->LoadFromFile(patch_path);
+  if (result != X_STATUS_SUCCESS) {
+    XELOGE("Failed to load XEX patch, code: {}", result);
+    return nullptr;
+  }
+
+  return patch_module;
+}
+
+bool KernelState::IsPatchSignatureProper(
+    const object_ref<UserModule> title_module,
+    const object_ref<UserModule> patch_module) const {
+  xex2_opt_delta_patch_descriptor* patch_header = nullptr;
+  patch_module->GetOptHeader(XEX_HEADER_DELTA_PATCH_DESCRIPTOR,
+                             reinterpret_cast<void**>(&patch_header));
+
+  assert_not_null(patch_header);
+
+  // Compare hash inside delta descriptor to base XEX signature
+  uint8_t digest[0x14];
+  sha1::SHA1 s;
+  s.processBytes(title_module->xex_module()->xex_security_info()->rsa_signature,
+                 0x100);
+  s.finalize(digest);
+
+  if (memcmp(digest, patch_header->digest_source, 0x14) != 0) {
+    XELOGW(
+        "XEX patch signature hash doesn't match base XEX signature hash, patch "
+        "will likely fail!");
+
+    return false;
+  }
+  return true;
+}
+
+X_RESULT KernelState::ApplyTitleUpdate(
+    const object_ref<UserModule> title_module,
+    const object_ref<UserModule> patch_module) {
+  if (!title_module) {
+    XELOGE("{}: No title_module provided!", __FUNCTION__);
+    return X_STATUS_UNSUCCESSFUL;
+  }
+
+  if (!patch_module) {
+    XELOGE("{}: No patch_module provided!", __FUNCTION__);
+    return X_STATUS_UNSUCCESSFUL;
+  }
+
+  X_STATUS result =
+      patch_module->xex_module()->ApplyPatch(title_module->xex_module());
+  if (result != X_STATUS_SUCCESS) {
+    XELOGE("Failed to apply XEX patch, code: {}", result);
   }
   return result;
 }
@@ -764,14 +859,14 @@ void KernelState::RegisterNotifyListener(XNotifyListener* listener) {
   // Games seem to expect a few notifications on startup, only for the first
   // listener.
   // https://cs.rin.ru/forum/viewtopic.php?f=38&t=60668&hilit=resident+evil+5&start=375
-  if (!has_notified_startup_ && listener->mask() & 0x00000001) {
+  if (!has_notified_startup_ && listener->mask() & kXNotifySystem) {
     has_notified_startup_ = true;
     // XN_SYS_UI (on, off)
-    listener->EnqueueNotification(0x00000009, 1);
-    listener->EnqueueNotification(0x00000009, 0);
+    listener->EnqueueNotification(kXNotificationIDSystemUI, 1);
+    listener->EnqueueNotification(kXNotificationIDSystemUI, 0);
     // XN_SYS_SIGNINCHANGED x2
-    listener->EnqueueNotification(0x0000000A, 1);
-    listener->EnqueueNotification(0x0000000A, 1);
+    listener->EnqueueNotification(kXNotificationIDSystemSignInChanged, 1);
+    listener->EnqueueNotification(kXNotificationIDSystemSignInChanged, 1);
   }
 }
 
@@ -1139,24 +1234,6 @@ void KernelState::EmulateCPInterruptDPC(uint32_t interrupt_callback,
   xboxkrnl::xeKeSetCurrentProcessType(X_PROCTYPE_IDLE, current_context);
 
   EndDPCImpersonation(current_context, dpc_scope);
-}
-
-void KernelState::UpdateUsedUserProfiles() {
-  const std::bitset<4> used_slots = GetConnectedUsers();
-
-  for (uint32_t i = 1; i < cvars::max_signed_profiles; i++) {
-    bool is_used = used_slots.test(i);
-
-    if (IsUserSignedIn(i) && !is_used) {
-      user_profiles_.erase(i);
-      BroadcastNotification(0x12, 0);
-    }
-
-    if (!IsUserSignedIn(i) && is_used) {
-      user_profiles_.emplace(i, std::make_unique<xam::UserProfile>(i));
-      BroadcastNotification(0x12, 0);
-    }
-  }
 }
 
 void KernelState::InitializeProcess(X_KPROCESS* process, uint32_t type,
