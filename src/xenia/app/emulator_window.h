@@ -13,6 +13,7 @@
 #include <memory>
 #include <string>
 
+#include "xenia/app/profile_dialogs.h"
 #include "xenia/emulator.h"
 #include "xenia/gpu/command_processor.h"
 #include "xenia/ui/imgui_dialog.h"
@@ -24,8 +25,6 @@
 #include "xenia/ui/window_listener.h"
 #include "xenia/ui/windowed_app_context.h"
 #include "xenia/xbox.h"
-
-#define MAX_USERS 4
 
 namespace xe {
 namespace app {
@@ -93,6 +92,9 @@ class EmulatorWindow {
   void SaveImage(const std::filesystem::path& path,
                  const xe::ui::RawImage& image);
 
+  void ToggleProfilesConfigDialog();
+  void SetHotkeysState(bool enabled) { disable_hotkeys_ = !enabled; }
+
   // Types of button functions for hotkeys.
   enum class ButtonFunctions {
     ToggleFullscreen,
@@ -108,11 +110,6 @@ class EmulatorWindow {
     IncTitleSelect,
     DecTitleSelect,
     Unknown
-  };
-
-  enum class gpu_cvar {
-    ClearMemoryPageState,
-    ReadbackResolve,
   };
 
   class ControllerHotKey {
@@ -233,8 +230,7 @@ class EmulatorWindow {
   void VibrateController(xe::hid::InputSystem* input_sys, uint32_t user_index,
                          bool vibrate = true);
   void GamepadHotKeys();
-  void ToggleGPUSetting(gpu_cvar index);
-  bool IsUseNexusForGameBarEnabled();
+  void ToggleGPUSetting(gpu::GPUSetting setting);
   void DisplayHotKeysConfig();
 
   static std::string CanonicalizeFileExtension(
@@ -245,6 +241,8 @@ class EmulatorWindow {
   void LoadRecentlyLaunchedTitles();
   void AddRecentlyLaunchedTitle(std::filesystem::path path_to_file,
                                 std::string title_name);
+
+  void ClearDialogs();
 
   Emulator* emulator_;
   ui::WindowedAppContext& app_context_;
@@ -257,11 +255,16 @@ class EmulatorWindow {
   std::unique_ptr<ui::ImmediateDrawer> immediate_drawer_;
 
   bool emulator_initialized_ = false;
+  std::atomic<bool> disable_hotkeys_ = false;
 
   std::string base_title_;
   bool initializing_shader_storage_ = false;
 
   std::unique_ptr<DisplayConfigDialog> display_config_dialog_;
+
+  // Storing pointers and toggling dialog state is useful for broadcasting
+  // messages back to guest.
+  std::unique_ptr<ProfileConfigDialog> profile_config_dialog_;
 
   std::vector<RecentTitleEntry> recently_launched_titles_;
 };

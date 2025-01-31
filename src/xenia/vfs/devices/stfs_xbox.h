@@ -340,7 +340,8 @@ struct XContentMetadata {
   } description_ex_raw;
 
   std::u16string display_name(XLanguage language) const {
-    uint32_t lang_id = uint32_t(language) - 1;
+    uint32_t lang_id =
+        language == XLanguage::kInvalid ? 1 : uint32_t(language) - 1;
 
     if (lang_id >= kNumLanguagesV2) {
       assert_always();
@@ -467,10 +468,12 @@ struct XContentMetadata {
 };
 static_assert_size(XContentMetadata, 0x93D6);
 
+static constexpr uint8_t license_count = 0x10;
+
 struct XContentHeader {
   be<XContentPackageType> magic;
   uint8_t signature[0x228];
-  XContentLicense licenses[0x10];
+  XContentLicense licenses[license_count];
   uint8_t content_id[0x14];
   be<uint32_t> header_size;
 

@@ -27,8 +27,6 @@ class Window;
 namespace xe {
 namespace hid {
 
-static constexpr uint8_t max_allowed_controllers = 4;
-
 class InputSystem {
  public:
   explicit InputSystem(xe::ui::Window* window);
@@ -42,18 +40,20 @@ class InputSystem {
 
   X_RESULT GetCapabilities(uint32_t user_index, uint32_t flags,
                            X_INPUT_CAPABILITIES* out_caps);
-  X_RESULT GetState(uint32_t user_index, X_INPUT_STATE* out_state);
+  X_RESULT GetState(uint32_t user_index, uint32_t flags,
+                    X_INPUT_STATE* out_state);
   X_RESULT SetState(uint32_t user_index, X_INPUT_VIBRATION* vibration);
   X_RESULT GetKeystroke(uint32_t user_index, uint32_t flags,
                         X_INPUT_KEYSTROKE* out_keystroke);
 
   bool GetVibrationCvar();
-
   void ToggleVibration();
 
-  const std::bitset<max_allowed_controllers> GetConnectedSlots() const {
+  const std::bitset<XUserMaxUserCount> GetConnectedSlots() const {
     return connected_slots;
   }
+
+  uint32_t GetLastUsedSlot() const { return last_used_slot; }
 
   std::unique_lock<xe_unlikely_mutex> lock();
 
@@ -68,13 +68,16 @@ class InputSystem {
   void AdjustDeadzoneLevels(const uint8_t slot, X_INPUT_GAMEPAD* gamepad);
   X_INPUT_VIBRATION ModifyVibrationLevel(X_INPUT_VIBRATION* vibration);
 
+  std::vector<InputDriver*> FilterDrivers(uint32_t flags);
+
   xe::ui::Window* window_ = nullptr;
 
   std::vector<std::unique_ptr<InputDriver>> drivers_;
 
-  std::bitset<max_allowed_controllers> connected_slots = {};
-  std::array<std::pair<joystick_value, joystick_value>, max_allowed_controllers>
+  std::bitset<XUserMaxUserCount> connected_slots = {};
+  std::array<std::pair<joystick_value, joystick_value>, XUserMaxUserCount>
       controllers_max_joystick_value = {};
+  uint32_t last_used_slot = 0;
 
   xe_unlikely_mutex lock_;
 };

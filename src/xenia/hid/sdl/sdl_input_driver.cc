@@ -129,12 +129,11 @@ void SDLInputDriver::LoadGameControllerDB() {
 
   if (!std::filesystem::exists(cvars::mappings_file)) {
     XELOGW("SDL GameControllerDB: file '{}' does not exist.",
-           xe::path_to_utf8(cvars::mappings_file));
+           cvars::mappings_file);
     return;
   }
 
-  XELOGI("SDL GameControllerDB: Loading {}",
-         xe::path_to_utf8(cvars::mappings_file));
+  XELOGI("SDL GameControllerDB: Loading {}", cvars::mappings_file);
 
   uint32_t updated_mappings = 0;
   uint32_t added_mappings = 0;
@@ -156,7 +155,7 @@ void SDLInputDriver::LoadGameControllerDB() {
     std::string guid = row[0];
     std::string controller_name = row[1];
 
-    auto format = [](std::string& ss, std::string& s) {
+    auto format = [](std::string ss, const std::string& s) {
       return ss.empty() ? s : ss + "," + s;
     };
 
@@ -282,7 +281,7 @@ X_RESULT SDLInputDriver::GetKeystroke(uint32_t users, uint32_t flags,
   // TODO(JoelLinn): Figure out the flags
   // https://github.com/evilC/UCR/blob/0489929e2a8e39caa3484c67f3993d3fba39e46f/Libraries/XInput.ahk#L85-L98
   assert(sdl_events_initialized_ && sdl_gamecontroller_initialized_);
-  bool user_any = users == 0xFF;
+  bool user_any = users == XUserIndexAny;
   if (users >= HID_SDL_USER_COUNT && !user_any) {
     return X_ERROR_BAD_ARGUMENTS;
   }
@@ -430,6 +429,8 @@ X_RESULT SDLInputDriver::GetKeystroke(uint32_t users, uint32_t flags,
   return X_ERROR_EMPTY;
 }
 
+InputType SDLInputDriver::GetInputType() const { return InputType::Controller; }
+
 void SDLInputDriver::HandleEvent(const SDL_Event& event) {
   // This callback will likely run on the thread that posts the event, which
   // may be a dedicated thread SDL has created for the joystick subsystem.
@@ -485,9 +486,10 @@ void SDLInputDriver::OnControllerDeviceAdded(const SDL_Event& event) {
       "ProductID(0x{:04X}), "
       "GUID({})",
       SDL_GameControllerName(controller),
-      SDL_JoystickGetType(SDL_GameControllerGetJoystick(controller)),
+      static_cast<uint32_t>(
+          SDL_JoystickGetType(SDL_GameControllerGetJoystick(controller))),
 #if SDL_VERSION_ATLEAST(2, 0, 12)
-      SDL_GameControllerGetType(controller),
+      static_cast<uint32_t>(SDL_GameControllerGetType(controller)),
 #else
       "?",
 #endif

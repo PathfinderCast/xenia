@@ -19,15 +19,11 @@ namespace xe {
 namespace kernel {
 namespace xam {
 
-UserProfile::UserProfile(uint8_t index) {
+UserProfile::UserProfile(uint64_t xuid, X_XAMACCOUNTINFO* account_info)
+    : xuid_(xuid), account_info_(*account_info) {
   // 58410A1F checks the user XUID against a mask of 0x00C0000000000000 (3<<54),
   // if non-zero, it prevents the user from playing the game.
   // "You do not have permissions to perform this operation."
-  xuid_ = 0xB13EBABEBABEBABE + index;
-  name_ = "User";
-  if (index) {
-    name_ = "User_" + std::to_string(index);
-  }
 
   // https://cs.rin.ru/forum/viewtopic.php?f=38&t=60668&hilit=gfwl+live&start=195
   // https://github.com/arkem/py360/blob/master/py360/constants.py
@@ -56,9 +52,9 @@ UserProfile::UserProfile(uint8_t index) {
   // XPROFILE_GAMER_CONTROL_SENSITIVITY
   AddSetting(std::make_unique<UserSetting>(0x10040018, 0));
   // Preferred color 1
-  AddSetting(std::make_unique<UserSetting>(0x1004001D, 0xFFFF0000u));
+  AddSetting(std::make_unique<UserSetting>(0x1004001D, PREFERRED_COLOR_NONE));
   // Preferred color 2
-  AddSetting(std::make_unique<UserSetting>(0x1004001E, 0xFF00FF00u));
+  AddSetting(std::make_unique<UserSetting>(0x1004001E, PREFERRED_COLOR_NONE));
   // XPROFILE_GAMER_ACTION_AUTO_AIM
   AddSetting(std::make_unique<UserSetting>(0x10040022, 1));
   // XPROFILE_GAMER_ACTION_AUTO_CENTER
@@ -136,7 +132,7 @@ UserSetting* UserProfile::GetSetting(uint32_t setting_id) {
 void UserProfile::LoadSetting(UserSetting* setting) {
   if (setting->is_title_specific()) {
     const std::filesystem::path content_dir =
-        kernel_state()->content_manager()->ResolveGameUserContentPath();
+        kernel_state()->content_manager()->ResolveGameUserContentPath(xuid_);
     const std::string setting_id_str =
         fmt::format("{:08X}", setting->GetSettingId());
     const std::filesystem::path file_path = content_dir / setting_id_str;
@@ -174,7 +170,8 @@ void UserProfile::LoadSetting(UserSetting* setting) {
   } else {
     // Unsupported for now.  Other settings aren't per-game and need to be
     // stored some other way.
-    XELOGW("Attempting to load unsupported profile setting from disk");
+    XELOGW("Attempting to load unsupported profile setting 0x{:08X} from disk",
+           setting->GetSettingId());
   }
 }
 
@@ -182,7 +179,7 @@ void UserProfile::SaveSetting(UserSetting* setting) {
   if (setting->is_title_specific() &&
       setting->GetSettingSource() == X_USER_PROFILE_SETTING_SOURCE::TITLE) {
     const std::filesystem::path content_dir =
-        kernel_state()->content_manager()->ResolveGameUserContentPath();
+        kernel_state()->content_manager()->ResolveGameUserContentPath(xuid_);
 
     std::filesystem::create_directories(content_dir);
 
@@ -208,7 +205,8 @@ void UserProfile::SaveSetting(UserSetting* setting) {
   } else {
     // Unsupported for now.  Other settings aren't per-game and need to be
     // stored some other way.
-    XELOGW("Attempting to save unsupported profile setting to disk");
+    XELOGW("Attempting to save unsupported profile setting 0x{:08X} from disk",
+           setting->GetSettingId());
   }
 }
 
@@ -234,6 +232,31 @@ Property* UserProfile::GetProperty(const AttributeKey id) {
   }
 
   return nullptr;
+}
+
+AchievementGpdStructure* UserProfile::GetAchievement(const uint32_t title_id,
+                                                     const uint32_t id) {
+  auto title_achievements = achievements_.find(title_id);
+  if (title_achievements == achievements_.end()) {
+    return nullptr;
+  }
+
+  for (auto& entry : title_achievements->second) {
+    if (entry.achievement_id == id) {
+      return &entry;
+    }
+  }
+  return nullptr;
+}
+
+std::vector<AchievementGpdStructure>* UserProfile::GetTitleAchievements(
+    const uint32_t title_id) {
+  auto title_achievements = achievements_.find(title_id);
+  if (title_achievements == achievements_.end()) {
+    return nullptr;
+  }
+
+  return &title_achievements->second;
 }
 
 }  // namespace xam

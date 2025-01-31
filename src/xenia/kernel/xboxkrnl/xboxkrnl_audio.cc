@@ -15,12 +15,14 @@
 #include "xenia/kernel/xboxkrnl/xboxkrnl_private.h"
 #include "xenia/xbox.h"
 
+DECLARE_uint32(audio_flag);
+
 namespace xe {
 namespace kernel {
 namespace xboxkrnl {
 
 dword_result_t XAudioGetSpeakerConfig_entry(lpdword_t config_ptr) {
-  *config_ptr = 0x00010001;
+  *config_ptr = cvars::audio_flag;
   return X_ERROR_SUCCESS;
 }
 DECLARE_XBOXKRNL_EXPORT1(XAudioGetSpeakerConfig, kAudio, kImplemented);
@@ -96,8 +98,9 @@ dword_result_t XAudioSubmitRenderDriverFrame_entry(lpunknown_t driver_ptr,
   assert_true((driver_ptr.guest_address() & 0xFFFF0000) == 0x41550000);
 
   auto audio_system = kernel_state()->emulator()->audio_system();
-  audio_system->SubmitFrame(driver_ptr.guest_address() & 0x0000FFFF,
-                            samples_ptr);
+  auto samples =
+      kernel_state()->memory()->TranslateVirtual<float*>(samples_ptr);
+  audio_system->SubmitFrame(driver_ptr.guest_address() & 0x0000FFFF, samples);
 
   return X_ERROR_SUCCESS;
 }

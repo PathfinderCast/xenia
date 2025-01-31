@@ -37,7 +37,7 @@ class XContentContainerDevice : public Device {
 
   ~XContentContainerDevice() override;
 
-  bool Initialize();
+  bool Initialize() override;
 
   const std::string& name() const override { return name_; }
   uint32_t attributes() const override { return 0; }
@@ -53,6 +53,8 @@ class XContentContainerDevice : public Device {
     return files_total_size_ - sizeof(XContentContainerHeader);
   }
 
+  uint64_t xuid() const { return header_->content_metadata.profile_id; }
+
   uint32_t title_id() const {
     return header_->content_metadata.execution_info.title_id;
   }
@@ -62,6 +64,15 @@ class XContentContainerDevice : public Device {
   }
 
   kernel::xam::XCONTENT_AGGREGATE_DATA content_header() const;
+  uint32_t license_mask() const {
+    uint32_t final_license = 0;
+    for (uint8_t i = 0; i < license_count; i++) {
+      if (header_->content_header.licenses[i].license_flags) {
+        final_license |= header_->content_header.licenses[i].license_bits;
+      }
+    }
+    return final_license;
+  }
 
  protected:
   XContentContainerDevice(const std::string_view mount_path,
@@ -82,9 +93,9 @@ class XContentContainerDevice : public Device {
   // Initialize any container specific fields.
   virtual void SetupContainer() {};
 
-  Entry* ResolvePath(const std::string_view path);
+  Entry* ResolvePath(const std::string_view path) override;
   void CloseFiles();
-  void Dump(StringBuffer* string_buffer);
+  void Dump(StringBuffer* string_buffer) override;
   Result ReadHeaderAndVerify(FILE* header_file);
 
   void SetName(std::string name) { name_ = name; }

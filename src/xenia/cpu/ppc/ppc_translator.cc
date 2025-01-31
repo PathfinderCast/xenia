@@ -28,6 +28,11 @@
 DEFINE_bool(dump_translated_hir_functions, false, "dumps translated hir",
             "CPU");
 
+DEFINE_bool(disable_context_promotion, false,
+            "Disables Context Promotion optimizations, this may be needed for "
+            "some sports games, but will reduce performance.",
+            "CPU");
+
 namespace xe {
 namespace cpu {
 namespace ppc {
@@ -54,10 +59,17 @@ PPCTranslator::PPCTranslator(PPCFrontend* frontend) : frontend_(frontend) {
 
   // Passes are executed in the order they are added. Multiple of the same
   // pass type may be used.
-  if (validate) compiler_->AddPass(std::make_unique<passes::ValidationPass>());
-  compiler_->AddPass(std::make_unique<passes::ContextPromotionPass>());
-  if (validate) compiler_->AddPass(std::make_unique<passes::ValidationPass>());
+  if (!cvars::disable_context_promotion) {
+    if (validate) {
+      compiler_->AddPass(std::make_unique<passes::ValidationPass>());
+    }
 
+    compiler_->AddPass(std::make_unique<passes::ContextPromotionPass>());
+
+    if (validate) {
+      compiler_->AddPass(std::make_unique<passes::ValidationPass>());
+    }
+  }
   // Grouped simplification + constant propagation.
   // Loops until no changes are made.
   auto sap = std::make_unique<passes::ConditionalGroupPass>();
@@ -139,11 +151,15 @@ void PPCTranslator::DumpHIR(GuestFunction* function, PPCHIRBuilder* builder) {
 
     {
       wchar_t tmpbuf[64];
+#ifdef XE_PLATFORM_WIN32
       _snwprintf(tmpbuf, 64, L"%X", function->address());
+#else
+      swprintf(tmpbuf, 64, L"%X", function->address());
+#endif
       folder_path.append(&tmpbuf[0]);
     }
 
-    FILE* f = fopen(folder_path.generic_u8string().c_str(), "w");
+    FILE* f = fopen(folder_path.string().c_str(), "w");
     if (f) {
       fputs(buffer.buffer(), f);
       fclose(f);
