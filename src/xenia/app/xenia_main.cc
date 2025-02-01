@@ -418,18 +418,6 @@ bool EmulatorApp::OnInitialize() {
   std::filesystem::path storage_root = cvars::storage_root;
   if (storage_root.empty()) {
     storage_root = xe::filesystem::GetExecutableFolder();
-    if (!cvars::portable &&
-        !std::filesystem::exists(storage_root / "portable.txt")) {
-      storage_root = xe::filesystem::GetUserFolder();
-#if defined(XE_PLATFORM_WIN32) || defined(XE_PLATFORM_GNU_LINUX)
-      storage_root = storage_root / "Xenia";
-#else
-      // TODO(Triang3l): Point to the app's external storage "files" directory
-      // on Android.
-#warning Unhandled platform for the data root.
-      storage_root = storage_root / "Xenia";
-#endif
-    }
   }
   storage_root = std::filesystem::absolute(storage_root);
   XELOGI("Storage root: {}", storage_root);
