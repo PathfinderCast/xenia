@@ -41,9 +41,9 @@
 #include "xenia/hid/input_system.h"
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/user_module.h"
-#include "xenia/kernel/util/xdbf_utils.h"
 #include "xenia/kernel/xam/achievement_manager.h"
 #include "xenia/kernel/xam/xam_module.h"
+#include "xenia/kernel/xam/xdbf/spa_info.h"
 #include "xenia/kernel/xbdm/xbdm_module.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_module.h"
 #include "xenia/memory.h"
@@ -192,12 +192,15 @@ X_STATUS Emulator::Setup(
   // logical processors.
   xe::threading::EnableAffinityConfiguration();
 
+  XELOGI("{}: Initializing Memory...", __func__);
   // Create memory system first, as it is required for other systems.
   memory_ = std::make_unique<Memory>();
   if (!memory_->Initialize()) {
-    return false;
+    XELOGE("{}: Cannot initalize memory!", __func__);
+    return result;
   }
 
+  XELOGI("{}: Initializing Exports...", __func__);
   // Shared export resolver used to attach and query for HLE exports.
   export_resolver_ = std::make_unique<xe::cpu::ExportResolver>();
 
@@ -218,30 +221,38 @@ X_STATUS Emulator::Setup(
     backend.reset(new xe::cpu::backend::NullBackend());
   }
 
+  XELOGI("{}: Initializing Processor...", __func__);
   // Initialize the CPU.
   processor_ = std::make_unique<xe::cpu::Processor>(memory_.get(),
                                                     export_resolver_.get());
   if (!processor_->Setup(std::move(backend))) {
+    XELOGE("{}: Cannot initalize processor!", __func__);
     return X_STATUS_UNSUCCESSFUL;
   }
 
+  XELOGI("{}: Initializing Audio...", __func__);
   // Initialize the APU.
   if (audio_system_factory) {
     audio_system_ = audio_system_factory(processor_.get());
     if (!audio_system_) {
+      XELOGE("{}: Cannot initalize audio_system!", __func__);
       return X_STATUS_NOT_IMPLEMENTED;
     }
   }
 
+  XELOGI("{}: Initializing Graphics...", __func__);
   // Initialize the GPU.
   graphics_system_ = graphics_system_factory();
   if (!graphics_system_) {
+    XELOGE("{}: Cannot initalize graphics_system!", __func__);
     return X_STATUS_NOT_IMPLEMENTED;
   }
 
+  XELOGI("{}: Initializing HID...", __func__);
   // Initialize the HID.
   input_system_ = std::make_unique<xe::hid::InputSystem>(display_window_);
   if (!input_system_) {
+    XELOGE("{}: Cannot initalize input_system!", __func__);
     return X_STATUS_NOT_IMPLEMENTED;
   }
   if (input_driver_factory) {
@@ -259,11 +270,13 @@ X_STATUS Emulator::Setup(
     return result;
   }
 
+  XELOGI("{}: Initializing VFS...", __func__);
   // Bring up the virtual filesystem used by the kernel.
   file_system_ = std::make_unique<xe::vfs::VirtualFileSystem>();
 
   patcher_ = std::make_unique<xe::patcher::Patcher>(storage_root_);
 
+  XELOGI("{}: Initializing Kernel...", __func__);
   // Shared kernel state.
   kernel_state_ = std::make_unique<xe::kernel::KernelState>(this);
 #define LOAD_KERNEL_MODULE(t) \
@@ -276,18 +289,22 @@ X_STATUS Emulator::Setup(
   plugin_loader_ = std::make_unique<xe::patcher::PluginLoader>(
       kernel_state_.get(), storage_root() / "plugins");
 
+  XELOGI("{}: Starting graphics_system...", __func__);
   // Setup the core components.
   result = graphics_system_->Setup(
       processor_.get(), kernel_state_.get(),
       display_window_ ? &display_window_->app_context() : nullptr,
       display_window_ != nullptr);
   if (result) {
+    XELOGE("{}: Failed to setup graphics_system!", __func__);
     return result;
   }
 
   if (audio_system_) {
+    XELOGI("{}: Starting audio_system...", __func__);
     result = audio_system_->Setup(kernel_state_.get());
     if (result) {
+      XELOGE("{}: Failed to setup audio_system!", __func__);
       return result;
     }
     audio_media_player_ = std::make_unique<apu::AudioMediaPlayer>(
@@ -379,7 +396,7 @@ Emulator::FileSignatureType Emulator::GetFileSignature(
   }
 
   const uint64_t file_size = std::filesystem::file_size(path);
-  const int64_t header_size = 4;
+  constexpr int64_t header_size = 4;
 
   if (file_size < header_size) {
     return FileSignatureType::Unknown;
@@ -1251,19 +1268,9 @@ std::string Emulator::FindLaunchModule() {
 }
 
 static std::string format_version(xex2_version version) {
-  // fmt::format doesn't like bit fields
-  uint32_t major, minor, build, qfe;
-  major = version.major;
-  minor = version.minor;
-  build = version.build;
-  qfe = version.qfe;
-  if (qfe) {
-    return fmt::format("{}.{}.{}.{}", major, minor, build, qfe);
-  }
-  if (build) {
-    return fmt::format("{}.{}.{}", major, minor, build);
-  }
-  return fmt::format("{}.{}", major, minor);
+  // fmt::format doesn't like bit fields we use + to bypass it
+  return fmt::format("{}.{}.{}.{}", +version.major, +version.minor,
+                     +version.build, +version.qfe);
 }
 
 X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
@@ -1362,9 +1369,13 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
     }
     game_config_load_callback_loop_next_index_ = SIZE_MAX;
 
-    const kernel::util::XdbfGameData db = kernel_state_->module_xdbf(module);
+    const auto db = kernel_state_->module_xdbf(module);
 
-    game_info_database_ = std::make_unique<kernel::util::GameInfoDatabase>(&db);
+    game_info_database_ =
+        std::make_unique<kernel::util::GameInfoDatabase>(db.get());
+    kernel_state_->xam_state()->LoadSpaInfo(db.get());
+
+    kernel_state_->xam_state()->user_tracker()->AddTitleToPlayedList();
 
     if (game_info_database_->IsValid()) {
       title_name_ = game_info_database_->GetTitleName(
@@ -1425,17 +1436,6 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
       if (!icon_block.empty()) {
         display_window_->SetIcon(icon_block.data(), icon_block.size());
       }
-
-      for (uint8_t slot = 0; slot < XUserMaxUserCount; slot++) {
-        auto user =
-            kernel_state_->xam_state()->profile_manager()->GetProfile(slot);
-
-        if (user) {
-          kernel_state_->xam_state()
-              ->achievement_manager()
-              ->LoadTitleAchievements(user->xuid(), db);
-        }
-      }
     }
   }
 
@@ -1461,7 +1461,8 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
   if (cvars::allow_plugins) {
     if (plugin_loader_->IsAnyPluginForTitleAvailable(title_id_.value(),
                                                      module->hash().value())) {
-      plugin_loader_->LoadTitlePlugins(title_id_.value());
+      plugin_loader_->LoadTitlePlugins(title_id_.value(),
+                                       module->hash().value());
     }
   }
 

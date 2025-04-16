@@ -55,8 +55,8 @@ class Window;
 namespace xe {
 
 constexpr fourcc_t kEmulatorSaveSignature = make_fourcc("XSAV");
-static const std::string kDefaultGameSymbolicLink = "GAME:";
-static const std::string kDefaultPartitionSymbolicLink = "D:";
+static constexpr std::string_view kDefaultGameSymbolicLink = "GAME:";
+static constexpr std::string_view kDefaultPartitionSymbolicLink = "D:";
 
 // The main type that runs the whole emulator.
 // This is responsible for initializing and managing all the various subsystems.
@@ -171,6 +171,9 @@ class Emulator {
 
   patcher::PluginLoader* plugin_loader() const { return plugin_loader_.get(); }
 
+  kernel::util::GameInfoDatabase* game_info_database() const {
+    return game_info_database_.get();
+  }
   // Initializes the emulator and configures all components.
   // The given window is used for display and the provided functions are used
   // to create subsystems as required.

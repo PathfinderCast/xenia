@@ -221,7 +221,7 @@ dword_result_t XGetAVPack_entry() {
 DECLARE_XAM_EXPORT1(XGetAVPack, kNone, kStub);
 
 uint32_t xeXGetGameRegion() {
-  static uint32_t const table[] = {
+  static uint32_t constexpr table[] = {
       0xFFFFu, 0x03FFu, 0x02FEu, 0x02FEu, 0x03FFu, 0x02FEu, 0x0201u, 0x03FFu,
       0x02FEu, 0x02FEu, 0x03FFu, 0x03FFu, 0x03FFu, 0x03FFu, 0x02FEu, 0x03FFu,
       0x00FFu, 0xFFFFu, 0x02FEu, 0x03FFu, 0x0102u, 0x03FFu, 0x03FFu, 0x02FEu,
@@ -649,8 +649,18 @@ dword_result_t lstrlenW_entry(lpu16string_t string) {
 }
 DECLARE_XAM_EXPORT1(lstrlenW, kNone, kImplemented);
 
-dword_result_t XGetAudioFlags_entry() { return cvars::audio_flag; }
-DECLARE_XAM_EXPORT1(XGetAudioFlags, kNone, kStub);
+dword_result_t XGetAudioFlags_entry() {
+  if (cvars::avpack == 2) {
+    return 2;
+  }
+
+  if (!cvars::audio_flag) {
+    return 0x10000 | 0x1;
+  }
+
+  return cvars::audio_flag;
+}
+DECLARE_XAM_EXPORT1(XGetAudioFlags, kNone, kImplemented);
 
 /*
         todo: this table should instead be pointed to by a member of kernel

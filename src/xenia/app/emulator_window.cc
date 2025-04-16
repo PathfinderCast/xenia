@@ -167,8 +167,8 @@ using xe::ui::UIEvent;
 using namespace xe::hid;
 using namespace xe::gpu;
 
-const std::string kRecentlyPlayedTitlesFilename = "recent.toml";
-const std::string kBaseTitle = "Xenia-canary";
+constexpr std::string_view kRecentlyPlayedTitlesFilename = "recent.toml";
+constexpr std::string_view kBaseTitle = "Xenia-canary";
 
 EmulatorWindow::EmulatorWindow(Emulator* emulator,
                                ui::WindowedAppContext& app_context,
@@ -181,7 +181,7 @@ EmulatorWindow::EmulatorWindow(Emulator* emulator,
           std::make_unique<ui::ImGuiDrawer>(window_.get(), kZOrderImGui)),
       display_config_game_config_load_callback_(
           new DisplayConfigGameConfigLoadCallback(*emulator, *this)) {
-  base_title_ = kBaseTitle +
+  base_title_ = std::string(kBaseTitle) +
 #ifdef DEBUG
 #if _NO_DEBUG_HEAP == 1
                 " DEBUG"
@@ -935,11 +935,16 @@ void EmulatorWindow::OnMouseUp(const ui::MouseEvent& e) {
 
 void EmulatorWindow::TakeScreenshot() {
   xe::ui::RawImage image;
+
+  imgui_drawer_->EnableNotifications(false);
+
   if (!GetGraphicsSystemPresenter()->CaptureGuestOutput(image) ||
       GetGraphicsSystemPresenter() == nullptr) {
     XELOGE("Failed to capture guest output for screenshot");
     return;
   }
+
+  imgui_drawer_->EnableNotifications(true);
   ExportScreenshot(image);
 }
 
@@ -1006,9 +1011,9 @@ void EmulatorWindow::ToggleFullscreenOnDoubleClick() {
   // this function tests if user has double clicked.
   // if double click was achieved the fullscreen gets toggled
   const auto now = steady_clock::now();  // current mouse event time
-  const int16_t mouse_down_max_threshold = 250;
-  const int16_t mouse_up_max_threshold = 250;
-  const int16_t mouse_up_down_max_delta = 100;
+  constexpr int16_t mouse_down_max_threshold = 250;
+  constexpr int16_t mouse_up_max_threshold = 250;
+  constexpr int16_t mouse_up_down_max_delta = 100;
   // max delta to prevent 'chaining' of double clicks with next mouse events
 
   const auto last_mouse_down_delta = diff_in_ms(now, last_mouse_down);
@@ -1424,6 +1429,12 @@ void EmulatorWindow::ToggleControllerVibration() {
     auto input_lock = input_sys->lock();
 
     input_sys->ToggleVibration();
+
+    if (emulator_->kernel_state()) {
+      emulator_->kernel_state()->BroadcastNotification(
+          kXNotificationSystemProfileSettingChanged,
+          static_cast<uint32_t>(input_sys->GetConnectedSlots().count()));
+    }
   }
 }
 
@@ -1624,7 +1635,7 @@ EmulatorWindow::ControllerHotKey EmulatorWindow::ProcessControllerHotkey(
   }
 
   // Hotkey cool-down to prevent toggling too fast
-  const std::chrono::milliseconds delay(75);
+  constexpr std::chrono::milliseconds delay(75);
 
   // If the Xbox Gamebar is enabled or the Guide button is disabled then
   // replace the Guide button with the Back button without redeclaring the key
@@ -1794,10 +1805,11 @@ EmulatorWindow::ControllerHotKey EmulatorWindow::ProcessControllerHotkey(
   }
 
   if (!notificationTitle.empty()) {
-    app_context_.CallInUIThread([=]() {
-      new xe::ui::HostNotificationWindow(imgui_drawer(), notificationTitle,
-                                         notificationDesc, 0);
-    });
+    app_context_.CallInUIThread(
+        [imgui_drawer = imgui_drawer(), notificationTitle, notificationDesc]() {
+          new xe::ui::HostNotificationWindow(imgui_drawer, notificationTitle,
+                                             notificationDesc, 0);
+        });
   }
 
   xe::threading::Sleep(delay);
@@ -1808,7 +1820,7 @@ EmulatorWindow::ControllerHotKey EmulatorWindow::ProcessControllerHotkey(
 void EmulatorWindow::VibrateController(xe::hid::InputSystem* input_sys,
                                        uint32_t user_index,
                                        bool toggle_rumble) {
-  const std::chrono::milliseconds rumble_duration(100);
+  constexpr std::chrono::milliseconds rumble_duration(100);
 
   // Hold lock while sleeping this thread for the duration of the rumble,
   // otherwise the rumble may fail.
@@ -1830,7 +1842,7 @@ void EmulatorWindow::VibrateController(xe::hid::InputSystem* input_sys,
 void EmulatorWindow::GamepadHotKeys() {
   X_INPUT_STATE state;
 
-  const std::chrono::milliseconds thread_delay(75);
+  constexpr std::chrono::milliseconds thread_delay(75);
 
   auto input_sys = emulator_->input_system();
 
