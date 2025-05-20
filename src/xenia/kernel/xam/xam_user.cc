@@ -107,10 +107,10 @@ DECLARE_XAM_EXPORT2(XamUserGetSigninState, kUserProfiles, kImplemented,
 
 typedef struct {
   xe::be<uint64_t> xuid;
-  xe::be<uint32_t> unk08;  // maybe zero?
+  xe::be<uint32_t> flags;
   xe::be<uint32_t> signin_state;
-  xe::be<uint32_t> unk10;  // ?
-  xe::be<uint32_t> unk14;  // ?
+  xe::be<uint32_t> guest_num;
+  xe::be<uint32_t> sponsor_user_index;
   char name[16];
 } X_USER_SIGNIN_INFO;
 static_assert_size(X_USER_SIGNIN_INFO, 40);
@@ -560,7 +560,7 @@ dword_result_t XamUserCreateAchievementEnumerator_entry(
     requester_xuid = xuid;
   }
 
-  uint32_t title_id_ =
+  const uint32_t title_id_ =
       title_id ? static_cast<uint32_t>(title_id) : kernel_state()->title_id();
 
   const auto user_title_achievements =
@@ -569,10 +569,15 @@ dword_result_t XamUserCreateAchievementEnumerator_entry(
 
   if (!user_title_achievements.empty()) {
     for (const auto& entry : user_title_achievements) {
+      auto unlock_time = X_FILETIME();
+      if (entry.IsUnlocked() && entry.unlock_time.is_valid()) {
+        unlock_time = entry.unlock_time;
+      }
+
       auto item = AchievementDetails(
           entry.achievement_id, entry.achievement_name.c_str(),
           entry.unlocked_description.c_str(), entry.locked_description.c_str(),
-          entry.image_id, entry.gamerscore, entry.unlock_time, entry.flags);
+          entry.image_id, entry.gamerscore, unlock_time, entry.flags);
 
       e->AppendItem(item);
     }
@@ -630,6 +635,68 @@ dword_result_t XamUserCreateTitlesPlayedEnumerator_entry(
   return X_ERROR_SUCCESS;
 }
 DECLARE_XAM_EXPORT1(XamUserCreateTitlesPlayedEnumerator, kUserProfiles, kStub);
+
+dword_result_t XamReadTile_entry(dword_t tile_type, dword_t title_id,
+                                 qword_t item_id, dword_t user_index,
+                                 lpdword_t output_ptr,
+                                 lpdword_t buffer_size_ptr,
+                                 lpvoid_t overlapped_ptr) {
+  auto user = kernel_state()->xam_state()->GetUserProfile(user_index);
+  if (!user) {
+    user = kernel_state()->xam_state()->GetUserProfile(item_id);
+    if (!user) {
+      return X_ERROR_INVALID_PARAMETER;
+    }
+  }
+
+  if (!buffer_size_ptr) {
+    return X_ERROR_INVALID_PARAMETER;
+  }
+
+  auto run = [=](uint32_t& extended_error, uint32_t& length) {
+    std::span<const uint8_t> tile =
+        kernel_state()->xam_state()->user_tracker()->GetIcon(
+            user->xuid(), title_id, static_cast<XTileType>(tile_type.value()),
+            item_id);
+
+    auto result = X_ERROR_SUCCESS;
+
+    if (tile.empty()) {
+      result = X_ERROR_FILE_NOT_FOUND;
+    }
+
+    *buffer_size_ptr = static_cast<uint32_t>(tile.size());
+
+    if (output_ptr) {
+      memcpy(output_ptr, tile.data(), tile.size());
+    } else {
+      result = X_ERROR_INSUFFICIENT_BUFFER;
+    }
+
+    extended_error = X_HRESULT_FROM_WIN32(result);
+    length = 0;
+    return result;
+  };
+
+  if (!overlapped_ptr) {
+    uint32_t extended_error, length;
+    return run(extended_error, length);
+  }
+
+  kernel_state()->CompleteOverlappedDeferredEx(run, overlapped_ptr);
+  return X_ERROR_IO_PENDING;
+}
+DECLARE_XAM_EXPORT1(XamReadTile, kUserProfiles, kSketchy);
+
+dword_result_t XamReadTileEx_entry(dword_t tile_type, dword_t game_id,
+                                   qword_t item_id, dword_t offset,
+                                   dword_t unk1, dword_t unk2,
+                                   lpdword_t output_ptr,
+                                   lpdword_t buffer_size_ptr) {
+  return XamReadTile_entry(tile_type, game_id, item_id, offset, output_ptr,
+                           buffer_size_ptr, 0);
+}
+DECLARE_XAM_EXPORT1(XamReadTileEx, kUserProfiles, kSketchy);
 
 dword_result_t XamParseGamerTileKey_entry(pointer_t<X_USER_DATA> key_ptr,
                                           lpdword_t title_id_ptr,
@@ -751,7 +818,7 @@ dword_result_t XamReadTileToTexture_entry(dword_t tile_type, dword_t title_id,
 }
 DECLARE_XAM_EXPORT1(XamReadTileToTexture, kUserProfiles, kStub);
 
-dword_result_t XamWriteGamerTile_entry(dword_t arg1, dword_t arg2,
+dword_result_t XamWriteGamerTile_entry(dword_t user_index, dword_t title_id,
                                        dword_t small_tile_id,
                                        dword_t big_tile_id, dword_t arg5,
                                        dword_t overlapped_ptr) {

@@ -475,7 +475,7 @@ X_STATUS UserTracker::GetProperty(const uint64_t xuid, uint32_t* property_size,
   }
 
   *property_size = 0;
-  const auto property_id = property->property_id;
+  const auto& property_id = property->property_id;
 
   const auto entry =
       std::find_if(user->properties_.cbegin(), user->properties_.cend(),
@@ -770,6 +770,8 @@ std::span<const uint8_t> UserTracker::GetIcon(uint64_t xuid, uint32_t title_id,
     }
     case XTileType::kGamerTile:
     case XTileType::kGamerTileSmall:
+    case XTileType::kLocalGamerTile:
+    case XTileType::kLocalGamerTileSmall:
     case XTileType::kPersonalGamerTile:
     case XTileType::kPersonalGamerTileSmall:
       return user->GetProfileIcon(tile_type);

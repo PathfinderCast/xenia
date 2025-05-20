@@ -17,6 +17,7 @@
 
 #include "third_party/fmt/include/fmt/format.h"
 #include "xenia/base/string.h"
+#include "xenia/kernel/title_id_utils.h"
 #include "xenia/kernel/xam/user_profile.h"
 #include "xenia/xbox.h"
 
@@ -38,7 +39,6 @@ namespace xe {
 namespace kernel {
 namespace xam {
 
-constexpr uint32_t kDashboardID = 0xFFFE07D1;
 const static std::string kDashboardStringID =
     fmt::format("{:08X}", kDashboardID);
 
@@ -64,7 +64,8 @@ class ProfileManager {
 
   bool CreateProfile(const std::string gamertag, bool autologin,
                      bool default_xuid = false);
-  // bool CreateProfile(const X_XAMACCOUNTINFO* account_info);
+  bool CreateProfile(const X_XAMACCOUNTINFO* account_info, uint64_t xuid);
+
   bool DeleteProfile(const uint64_t xuid);
 
   void ModifyGamertag(const uint64_t xuid, std::string gamertag);
@@ -105,7 +106,8 @@ class ProfileManager {
  private:
   void UpdateConfig(const uint64_t xuid, const uint8_t slot);
   bool CreateAccount(const uint64_t xuid, const std::string gamertag);
-  bool UpdateAccount(const uint64_t xuid, X_XAMACCOUNTINFO* account);
+  bool CreateAccount(const uint64_t xuid, const X_XAMACCOUNTINFO* account);
+  bool UpdateAccount(const uint64_t xuid, const X_XAMACCOUNTINFO* account);
 
   std::filesystem::path GetProfilePath(const uint64_t xuid) const;
   std::filesystem::path GetProfilePath(const std::string xuid) const;

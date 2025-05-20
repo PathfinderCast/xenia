@@ -26,10 +26,10 @@ namespace kernel {
 namespace xam {
 
 enum class X_USER_PROFILE_SETTING_SOURCE : uint32_t {
-  NOT_SET = 0,
+  NO_VALUE = 0,
   DEFAULT = 1,  // Default value taken from default OS values.
   TITLE = 2,    // Value written by title or OS.
-  UNKNOWN = 3,
+  PERMISSION_DENIED = 3,
 };
 
 struct X_USER_PROFILE_SETTING {
@@ -91,11 +91,13 @@ class UserProfile {
 
   std::span<const uint8_t> GetProfileIcon(XTileType icon_type) {
     // Overwrite same types?
-    if (icon_type == XTileType::kPersonalGamerTile) {
+    if (icon_type == XTileType::kPersonalGamerTile ||
+        icon_type == XTileType::kLocalGamerTile) {
       icon_type = XTileType::kGamerTile;
     }
 
-    if (icon_type == XTileType::kPersonalGamerTileSmall) {
+    if (icon_type == XTileType::kPersonalGamerTileSmall ||
+        icon_type == XTileType::kLocalGamerTileSmall) {
       icon_type = XTileType::kGamerTileSmall;
     }
 

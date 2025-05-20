@@ -202,8 +202,9 @@ bool ProfileManager::LoadAccount(const uint64_t xuid) {
   file_data.resize(output_file->entry()->size());
 
   size_t bytes_read = 0;
-  output_file->ReadSync(file_data.data(), output_file->entry()->size(), 0,
-                        &bytes_read);
+  output_file->ReadSync(
+      std::span<uint8_t>(file_data.data(), output_file->entry()->size()), 0,
+      &bytes_read);
   output_file->Destroy();
 
   if (bytes_read < sizeof(X_XAMACCOUNTINFO)) {
@@ -384,12 +385,12 @@ std::vector<uint64_t> ProfileManager::FindProfiles() const {
       continue;
     }
 
-    XELOGE("{}: Adding profile {} to profile list", __func__, profile_xuid);
+    XELOGI("{}: Adding profile {} to profile list", __func__, profile_xuid);
     profiles_xuids.push_back(
         xe::string_util::from_string<uint64_t>(profile_xuid, true));
   }
 
-  XELOGE("ProfileManager: Found {} Profiles", profiles_xuids.size());
+  XELOGI("ProfileManager: Found {} Profiles", profiles_xuids.size());
   return profiles_xuids;
 }
 
@@ -489,6 +490,23 @@ bool ProfileManager::CreateProfile(const std::string gamertag, bool autologin,
   return is_account_created;
 }
 
+bool ProfileManager::CreateProfile(const X_XAMACCOUNTINFO* account_info,
+                                   uint64_t xuid) {
+  if (!xuid) {
+    xuid = GenerateXuid();
+  }
+
+  if (!std::filesystem::create_directories(GetProfilePath(xuid))) {
+    return false;
+  }
+
+  if (!MountProfile(xuid)) {
+    return false;
+  }
+
+  return CreateAccount(xuid, account_info);
+}
+
 const X_XAMACCOUNTINFO* ProfileManager::GetAccount(const uint64_t xuid) {
   if (!accounts_.count(xuid)) {
     return nullptr;
@@ -505,15 +523,26 @@ bool ProfileManager::CreateAccount(const uint64_t xuid,
   string_util::copy_truncating(account.gamertag, gamertag_u16,
                                sizeof(account.gamertag));
 
-  UpdateAccount(xuid, &account);
+  const bool result = UpdateAccount(xuid, &account);
   DismountProfile(xuid);
 
-  accounts_.insert({xuid, account});
-  return true;
+  if (result) {
+    accounts_.insert({xuid, account});
+  }
+  return result;
+}
+
+bool ProfileManager::CreateAccount(const uint64_t xuid,
+                                   const X_XAMACCOUNTINFO* account) {
+  const bool result = UpdateAccount(xuid, account);
+  if (result) {
+    accounts_.insert({xuid, *account});
+  }
+  return result;
 }
 
 bool ProfileManager::UpdateAccount(const uint64_t xuid,
-                                   X_XAMACCOUNTINFO* account) {
+                                   const X_XAMACCOUNTINFO* account) {
   const std::string guest_path =
       fmt::format(kDefaultMountFormat, xuid) + ":\\Account";
 
@@ -534,8 +563,9 @@ bool ProfileManager::UpdateAccount(const uint64_t xuid,
   EncryptAccountFile(account, encrypted_data.data());
 
   size_t written_bytes = 0;
-  output_file->WriteSync(encrypted_data.data(), encrypted_data.size(), 0,
-                         &written_bytes);
+  output_file->WriteSync(
+      std::span<uint8_t>(encrypted_data.data(), encrypted_data.size()), 0,
+      &written_bytes);
   output_file->Destroy();
   return true;
 }

@@ -185,7 +185,6 @@ class KernelState {
   vfs::VirtualFileSystem* file_system() const { return file_system_; }
 
   uint32_t title_id() const;
-  static bool is_title_system_type(uint32_t title_id);
   const std::unique_ptr<xam::SpaInfo> title_xdbf() const;
   const std::unique_ptr<xam::SpaInfo> module_xdbf(
       object_ref<UserModule> exec_module) const;
@@ -310,7 +309,7 @@ class KernelState {
   bool Restore(ByteStream* stream);
 
   uint32_t notification_position_ = 2;
-  XDeploymentType deployment_type_ = XDeploymentType::kUnknown;
+  XDeploymentType deployment_type_ = XDeploymentType::kOther;
 
   uint32_t GetKeTimestampBundle();
 
@@ -389,6 +388,7 @@ class KernelState {
 
  public:
   uint32_t dash_context_ = 0;
+  X_DASH_APP_INFO dash_app_info_ = {};
   std::unordered_map<XObject::Type, uint32_t>
       host_object_type_enum_to_guest_object_type_ptr_;
   uint32_t GetKernelGuestGlobals() const { return kernel_guest_globals_; }

@@ -67,6 +67,7 @@ typedef uint32_t X_STATUS;
 #define X_STATUS_THREAD_IS_TERMINATING                  ((X_STATUS)0xC000004BL)
 #define X_STATUS_PROCEDURE_NOT_FOUND                    ((X_STATUS)0xC000007AL)
 #define X_STATUS_INVALID_IMAGE_FORMAT                   ((X_STATUS)0xC000007BL)
+#define X_STATUS_DISK_FULL                              ((X_STATUS)0xC000007FL)
 #define X_STATUS_INSUFFICIENT_RESOURCES                 ((X_STATUS)0xC000009AL)
 #define X_STATUS_MEMORY_NOT_ALLOCATED                   ((X_STATUS)0xC00000A0L)
 #define X_STATUS_FILE_IS_A_DIRECTORY                    ((X_STATUS)0xC00000BAL)
@@ -197,6 +198,7 @@ struct XAM_OVERLAPPED {
   xe::be<uint32_t> completion_context;  // 0x14
   xe::be<uint32_t> extended_error;      // 0x18
 };
+static_assert_size(XAM_OVERLAPPED, 0x1C);
 
 inline uint32_t XOverlappedGetResult(void* ptr) {
   auto p = reinterpret_cast<uint32_t*>(ptr);
@@ -372,8 +374,8 @@ struct X_VIDEO_MODE {
   be<uint32_t> is_hi_def;
   be<float> refresh_rate;
   be<uint32_t> video_standard;
-  be<uint32_t> unknown_0x8a;
-  be<uint32_t> unknown_0x01;
+  be<uint32_t> pixel_rate;
+  be<uint32_t> widescreen_flag;
   be<uint32_t> reserved[3];
 };
 static_assert_size(X_VIDEO_MODE, 48);
@@ -410,7 +412,7 @@ struct X_IO_STATUS_BLOCK {
 struct X_EX_TITLE_TERMINATE_REGISTRATION {
   xe::be<uint32_t> notification_routine;  // 0x0
   xe::be<uint32_t> priority;              // 0x4
-  X_LIST_ENTRY list_entry;                // 0x8 ??
+  X_LIST_ENTRY list_entry;                // 0x8
 };
 static_assert_size(X_EX_TITLE_TERMINATE_REGISTRATION, 16);
 
@@ -635,9 +637,9 @@ enum X_MARKETPLACE_ENTRYPOINT : uint32_t {
 
 enum class XDeploymentType : uint32_t {
   kOpticalDisc = 0,
-  kHardDrive = 1,  // Like extracted?
-  kGoD = 2,
-  kUnknown = 0xFF,
+  kInstalledToHDD = 1,  // Like extracted?
+  kDownload = 2,
+  kOther = 3,
 };
 
 inline bool IsOfflineXUID(uint64_t xuid) { return ((xuid >> 60) & 0xF) == 0xE; }
@@ -749,6 +751,7 @@ struct MESSAGEBOX_RESULT {
     xe::be<uint16_t> Passcode[4];
   };
 };
+static_assert_size(MESSAGEBOX_RESULT, 0x8);
 
 // clang-format off
 
@@ -777,6 +780,14 @@ struct MESSAGEBOX_RESULT {
 #define DPAD_DOWN_PASSCODE          0x00005811
 #define DPAD_LEFT_PASSCODE          0x00005812
 #define DPAD_RIGHT_PASSCODE         0x00005813
+
+#pragma pack(push, 4)
+struct X_DASH_APP_INFO {
+  uint64_t unk1;
+  uint32_t unk2;
+};
+static_assert_size(X_DASH_APP_INFO, 0xC);
+#pragma pack(pop)
 
 // clang-format on
 

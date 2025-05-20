@@ -127,18 +127,6 @@ uint32_t KernelState::title_id() const {
   return 0;
 }
 
-bool KernelState::is_title_system_type(uint32_t title_id) {
-  if (!title_id) {
-    return true;
-  }
-
-  if ((title_id & 0xFF000000) == 0x58000000u) {
-    return (title_id & 0xFF0000) != 0x410000;  // if 'X' but not 'XA' (XBLA)
-  }
-
-  return (title_id >> 16) == 0xFFFE;
-}
-
 const std::unique_ptr<xam::SpaInfo> KernelState::title_xdbf() const {
   return module_xdbf(executable_module_);
 }
@@ -169,8 +157,8 @@ bool KernelState::UpdateSpaData(vfs::Entry* spa_file_update) {
   std::vector<uint8_t> data(spa_file_update->size());
 
   size_t read_bytes = 0;
-  if (file->ReadSync(data.data(), spa_file_update->size(), 0, &read_bytes) !=
-      X_STATUS_SUCCESS) {
+  if (file->ReadSync(std::span<uint8_t>(data.data(), spa_file_update->size()),
+                     0, &read_bytes) != X_STATUS_SUCCESS) {
     return false;
   }
 
