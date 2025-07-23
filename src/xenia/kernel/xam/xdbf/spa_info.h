@@ -38,6 +38,8 @@ enum class TitleType : uint32_t {
   kFull = 1,
   kDemo = 2,
   kDownload = 3,
+  kUnknown = 4,
+  kApp = 5
 };
 
 enum class TitleFlags {
@@ -128,6 +130,7 @@ static_assert_size(AchievementTableEntry, 0x24);
 class SpaInfo : public XdbfFile {
  public:
   SpaInfo(const std::span<uint8_t> buffer);
+  ~SpaInfo() = default;
 
   void Load();
 

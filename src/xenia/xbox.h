@@ -13,7 +13,6 @@
 #include <map>
 #include <string>
 
-#include "xenia/base/chrono.h"
 #include "xenia/base/memory.h"
 #include "xenia/base/string.h"
 
@@ -275,14 +274,16 @@ constexpr uint8_t XUserIndexAny = 0xFF;
 
 // https://github.com/ThirteenAG/Ultimate-ASI-Loader/blob/master/source/xlive/xliveless.h
 typedef uint32_t XNotificationID;
-enum : XNotificationID {
-  /* XNotification Notes:
-     - Notification Ids are split into three Sections: Area, Version, and
-     Message Id.
-     - Each Area has the potential to hold 65535 unique notifications as it
-     always starts at 1.
-  */
 
+struct X_NOTIFICATION_ID {
+  uint32_t reserved : 1;  // Always one
+  uint32_t area : 6;
+  uint32_t version : 9;
+  uint32_t message_id : 16;
+};
+static_assert_size(X_NOTIFICATION_ID, 4);
+
+enum : XNotificationID {
   // Notification Areas
   kXNotifySystem = 0x00000001,
   kXNotifyLive = 0x00000002,
@@ -325,10 +326,16 @@ enum : XNotificationID {
   kXNotificationLiveConnectionChanged = 0x02000001,
   kXNotificationLiveInviteAccepted = 0x02000002,
   kXNotificationLiveLinkStateChanged = 0x02000003,
+  kXNotificationLiveInvitedRecieved = 0x02000004,
+  kXNotificationLiveInvitedAnswerRecieved = 0x02000005,
+  kXNotificationLiveMessageListChanged = 0x02000006,
   kXNotificationLiveContentInstalled = 0x02000007,
   kXNotificationLiveMembershipPurchased = 0x02000008,
   kXNotificationLiveVoicechatAway = 0x02000009,
   kXNotificationLivePresenceChanged = 0x0200000A,
+  kXNotificationLivePointsBalanceChanged = 0x0200000B,
+  kXNotificationLivePlayerListChanged = 0x0200000C,
+  kXNotificationLiveItemPurchased = 0x0200000D,
 
   // XNotification Friends
   kXNotificationFriendsPresenceChanged = 0x04000001,
@@ -363,6 +370,18 @@ enum : XNotificationID {
 
   // XNotification Msgr
   kXNotificationMsgrUnknown = 0x0C00000E,
+};
+
+enum FIRMWARE_REENTRY {
+  HalHaltRoutine = 0x0,
+  HalRebootRoutine = 0x1,
+  HalKdRebootRoutine = 0x2,
+  HalFatalErrorRebootRoutine = 0x3,
+  HalResetSMCRoutine = 0x4,
+  HalPowerDownRoutine = 0x5,
+  HalRebootQuiesceRoutine = 0x6,
+  HalForceShutdownRoutine = 0x7,
+  HalPowerCycleQuiesceRoutine = 0x8,
 };
 
 // https://github.com/CodeAsm/ffplay360/blob/master/Common/XTLOnPC.h
@@ -482,48 +501,6 @@ struct X_KSPINLOCK {
   xe::be<uint32_t> prcb_of_owner;
 };
 static_assert_size(X_KSPINLOCK, 4);
-
-struct X_FILETIME {
-  static constexpr uint64_t minimal_valid_time = 125911584000000000;
-  static constexpr uint64_t maximal_valid_time = 157469184000000000;
-
-  xe::be<uint32_t> high_part;
-  xe::be<uint32_t> low_part;
-
-  X_FILETIME() {
-    high_part = 0;
-    low_part = 0;
-  }
-
-  X_FILETIME(uint64_t filetime) {
-    high_part = static_cast<uint32_t>(filetime >> 32);
-    low_part = static_cast<uint32_t>(filetime);
-  }
-
-  X_FILETIME(std::time_t time) {
-    const auto file_time =
-        chrono::WinSystemClock::to_file_time(chrono::WinSystemClock::from_sys(
-            std::chrono::system_clock::from_time_t(time)));
-
-    high_part = static_cast<uint32_t>(file_time >> 32);
-    low_part = static_cast<uint32_t>(file_time);
-  }
-
-  chrono::WinSystemClock::time_point to_time_point() const {
-    const uint64_t filetime =
-        (static_cast<uint64_t>(high_part) << 32) | low_part;
-
-    return chrono::WinSystemClock::from_file_time(filetime);
-  }
-
-  bool is_valid() const {
-    const uint64_t filetime =
-        (static_cast<uint64_t>(high_part) << 32) | low_part;
-
-    return filetime >= minimal_valid_time && filetime <= maximal_valid_time;
-  }
-};
-static_assert_size(X_FILETIME, 0x8);
 #pragma pack(pop)
 
 // Found by dumping the kSectionStringTable sections of various games:
@@ -545,6 +522,117 @@ enum class XLanguage : uint32_t {
   kRussian = 12,
   // STFS headers can't support any more languages than these
   kMaxLanguages = 13
+};
+
+enum class XOnlineCountry : uint32_t {
+  kUnitedArabEmirates = 1,
+  kAlbania = 2,
+  kArmenia = 3,
+  kArgentina = 4,
+  kAustria = 5,
+  kAustralia = 6,
+  kAzerbaijan = 7,
+  kBelgium = 8,
+  kBulgaria = 9,
+  kBahrain = 10,
+  kBruneiDarussalam = 11,
+  kBolivia = 12,
+  kBrazil = 13,
+  kBelarus = 14,
+  kBelize = 15,
+  kCanada = 16,
+  kSwitzerland = 18,
+  kChile = 19,
+  kChina = 20,
+  kColombia = 21,
+  kCostaRica = 22,
+  kCzechRepublic = 23,
+  kGermany = 24,
+  kDenmark = 25,
+  kDominicanRepublic = 26,
+  kAlgeria = 27,
+  kEcuador = 28,
+  kEstonia = 29,
+  kEgypt = 30,
+  kSpain = 31,
+  kFinland = 32,
+  kFaroeIslands = 33,
+  kFrance = 34,
+  kGreatBritain = 35,
+  kGeorgia = 36,
+  kGreece = 37,
+  kGuatemala = 38,
+  kHongKong = 39,
+  kHonduras = 40,
+  kCroatia = 41,
+  kHungary = 42,
+  kIndonesia = 43,
+  kIreland = 44,
+  kIsrael = 45,
+  kIndia = 46,
+  kIraq = 47,
+  kIran = 48,
+  kIceland = 49,
+  kItaly = 50,
+  kJamaica = 51,
+  kJordan = 52,
+  kJapan = 53,
+  kKenya = 54,
+  kKyrgyzstan = 55,
+  kKorea = 56,
+  kKuwait = 57,
+  kKazakhstan = 58,
+  kLebanon = 59,
+  kLiechtenstein = 60,
+  kLithuania = 61,
+  kLuxembourg = 62,
+  kLatvia = 63,
+  kLibya = 64,
+  kMorocco = 65,
+  kMonaco = 66,
+  kMacedonia = 67,
+  kMongolia = 68,
+  kMacau = 69,
+  kMaldives = 70,
+  kMexico = 71,
+  kMalaysia = 72,
+  kNicaragua = 73,
+  kNetherlands = 74,
+  kNorway = 75,
+  kNewZealand = 76,
+  kOman = 77,
+  kPanama = 78,
+  kPeru = 79,
+  kPhilippines = 80,
+  kPakistan = 81,
+  kPoland = 82,
+  kPuertoRico = 83,
+  kPortugal = 84,
+  kParaguay = 85,
+  kQatar = 86,
+  kRomania = 87,
+  kRussianFederation = 88,
+  kSaudiArabia = 89,
+  kSweden = 90,
+  kSingapore = 91,
+  kSlovenia = 92,
+  kSlovakRepublic = 93,
+  kElSalvador = 95,
+  kSyria = 96,
+  kThailand = 97,
+  kTunisia = 98,
+  kTurkey = 99,
+  kTrinidadAndTobago = 100,
+  kTaiwan = 101,
+  kUkraine = 102,
+  kUnitedStates = 103,
+  kUruguay = 104,
+  kUzbekistan = 105,
+  kVenezuela = 106,
+  kVietNam = 107,
+  kYemen = 108,
+  kSouthAfrica = 109,
+  kZimbabwe = 110
 };
 
 enum class XContentType : uint32_t {
@@ -585,7 +673,7 @@ enum class XContentType : uint32_t {
   kCommunityGame = 0x02000000,
 };
 
-const static std::map<XContentType, std::string> XContentTypeMap = {
+inline const std::map<XContentType, std::string> XContentTypeMap = {
     {XContentType::kSavedGame, "Saved Game"},
     {XContentType::kMarketplaceContent, "Marketplace Content"},
     {XContentType::kPublisher, "Publisher"},
@@ -622,6 +710,17 @@ const static std::map<XContentType, std::string> XContentTypeMap = {
     {XContentType::kCommunityGame, "Community Game"},
 };
 
+enum class X_MARKETPLACE_OFFERING_TYPE : uint32_t {
+  Content = 0x00000002,
+  GameDemo = 0x00000020,
+  GameTrailer = 0x00000040,
+  Theme = 0x00000080,
+  Tile = 0x00000800,
+  Arcade = 0x00002000,
+  Video = 0x00004000,
+  Consumable = 0x00010000,
+};
+
 enum X_MARKETPLACE_ENTRYPOINT : uint32_t {
   ContentList = 0,
   ContentItem = 1,
@@ -633,6 +732,11 @@ enum X_MARKETPLACE_ENTRYPOINT : uint32_t {
   ForcedNameChangeV2 = 8,
   ProfileNameChange = 9,
   ActiveDownloads = 12
+};
+
+enum X_MARKETPLACE_DOWNLOAD_ITEMS_ENTRYPOINTS : uint32_t {
+  FREEITEMS = 1000,
+  PAIDITEMS,
 };
 
 enum class XDeploymentType : uint32_t {
@@ -706,25 +810,36 @@ struct X_XAMACCOUNTINFO {
   char passport_password[0x20];
   char owner_passport_membername[0x72];
 
-  bool IsPasscodeEnabled() {
+  bool IsPasscodeEnabled() const {
     return static_cast<bool>(reserved_flags &
                              AccountReservedFlags::kPasswordProtected);
   }
 
-  bool IsLiveEnabled() {
+  bool IsLiveEnabled() const {
     return static_cast<bool>(reserved_flags &
                              AccountReservedFlags::kLiveEnabled);
   }
 
+  uint64_t GetOnlineXUID() const { return xuid_online; }
+
+  std::string_view GetOnlineDomain() const {
+    return std::string_view(online_domain);
+  }
+
+  uint32_t GetReservedFlags() const { return reserved_flags; };
   uint32_t GetCachedFlags() const { return cached_user_flags; };
 
-  uint32_t GetCountry() const {
-    return (cached_user_flags & kCountryMask) >> 8;
+  XOnlineCountry GetCountry() const {
+    return static_cast<XOnlineCountry>((cached_user_flags & kCountryMask) >> 8);
   }
 
   AccountSubscriptionTier GetSubscriptionTier() const {
     return static_cast<AccountSubscriptionTier>(
         (cached_user_flags & kSubscriptionTierMask) >> 20);
+  }
+
+  bool IsParentalControlled() const {
+    return static_cast<bool>((cached_user_flags & kLanguageMask) >> 24);
   }
 
   XLanguage GetLanguage() const {
@@ -734,8 +849,90 @@ struct X_XAMACCOUNTINFO {
   std::string GetGamertagString() const {
     return xe::to_utf8(std::u16string(gamertag));
   }
+
+  void ToggleLiveFlag(bool is_live) {
+    reserved_flags = reserved_flags & ~AccountReservedFlags::kLiveEnabled;
+
+    if (is_live) {
+      reserved_flags = reserved_flags | AccountReservedFlags::kLiveEnabled;
+    }
+  }
+
+  void SetCountry(XOnlineCountry country) {
+    cached_user_flags = cached_user_flags & ~kCountryMask;
+    cached_user_flags = cached_user_flags |
+                        (static_cast<uint32_t>(country) << 8) & kCountryMask;
+  }
+
+  void SetLanguage(XLanguage language) {
+    cached_user_flags = cached_user_flags & ~kLanguageMask;
+
+    cached_user_flags = cached_user_flags |
+                        (static_cast<uint32_t>(language) << 25) & kLanguageMask;
+  }
+
+  void SetSubscriptionTier(AccountSubscriptionTier sub_tier) {
+    cached_user_flags = cached_user_flags & ~kSubscriptionTierMask;
+
+    cached_user_flags =
+        cached_user_flags |
+        (static_cast<uint32_t>(sub_tier) << 20) & kSubscriptionTierMask;
+  }
 };
 static_assert_size(X_XAMACCOUNTINFO, 0x17C);
+
+#define MAX_FIRSTNAME_SIZE 64
+#define MAX_LASTNAME_SIZE 64
+#define MAX_EMAIL_SIZE 129
+#define MAX_STREET_SIZE 128
+#define MAX_CITY_SIZE 64
+#define MAX_DISTRICT_SIZE 64
+#define MAX_STATE_SIZE 64
+#define MAX_POSTALCODE_SIZE 16
+#define MAX_PHONE_PREFIX_SIZE 12
+#define MAX_PHONE_NUMBER_SIZE 12
+#define MAX_PHONE_EXTENSION_SIZE 12
+#define MAX_CC_NAME_SIZE 64
+#define MAX_CC_NUMBER_SIZE 24
+#define MAX_DD_BANK_CODE_SIZE 64
+#define MAX_DD_BRANCH_CODE_SIZE 64
+#define MAX_DD_CHECK_DIGITS_SIZE 64
+#define MAX_VOUCHER_SIZE 26
+
+struct X_USER_PAYMENT_INFO {
+  char16_t FirstName[MAX_FIRSTNAME_SIZE];
+  char16_t LastName[MAX_LASTNAME_SIZE];
+  char16_t Street1[MAX_STREET_SIZE];
+  char16_t Street2[MAX_STREET_SIZE];
+  char16_t District[MAX_STREET_SIZE];
+  char16_t City[MAX_CITY_SIZE];
+  char16_t State[MAX_STATE_SIZE];
+  uint8_t CountryId;
+  uint16_t LanguageId;
+  char16_t PostalCode[MAX_POSTALCODE_SIZE];
+  char16_t PhonePrefix[MAX_PHONE_PREFIX_SIZE];
+  char16_t PhoneNumber[MAX_PHONE_NUMBER_SIZE];
+  char16_t PhoneExtension[MAX_PHONE_EXTENSION_SIZE];
+
+  uint8_t PaymentTypeId;
+  char16_t CardHolder[MAX_CC_NAME_SIZE];
+  uint8_t CardTypeId;
+  char16_t CardNumber[MAX_CC_NUMBER_SIZE];
+  be<uint64_t> ftCardExpiration;
+
+  char16_t Email[MAX_EMAIL_SIZE];
+  char16_t BankCode[MAX_DD_BANK_CODE_SIZE];
+  char16_t BranchCode[MAX_DD_BRANCH_CODE_SIZE];
+  char16_t CheckDigits[MAX_DD_CHECK_DIGITS_SIZE];
+
+  char16_t Voucher[MAX_VOUCHER_SIZE];
+
+  uint8_t MsftOptIn;
+  uint8_t PartnerOptIn;
+  uint64_t OfferId;
+  be<uint64_t> ftBirthdate;
+};
+static_assert_size(X_USER_PAYMENT_INFO, 0x8F0);
 #pragma pack(pop)
 
 struct X_PROFILEENUMRESULT {
@@ -788,6 +985,11 @@ struct X_DASH_APP_INFO {
 };
 static_assert_size(X_DASH_APP_INFO, 0xC);
 #pragma pack(pop)
+
+struct X_PASSPORT_SESSION_TOKEN {
+  uint8_t SessionToken[28];
+};
+static_assert_size(X_PASSPORT_SESSION_TOKEN, 0x1C);
 
 // clang-format on
 

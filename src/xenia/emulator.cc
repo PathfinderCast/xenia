@@ -9,9 +9,6 @@
 
 #include "xenia/emulator.h"
 
-#include <algorithm>
-#include <cinttypes>
-
 #include "config.h"
 #include "third_party/fmt/include/fmt/format.h"
 #include "third_party/tabulate/single_include/tabulate/tabulate.hpp"
@@ -508,21 +505,31 @@ X_STATUS Emulator::LaunchXexFile(const std::filesystem::path& path) {
   auto fs_path = "game:\\" + xe::path_to_utf8(file_name);
   X_STATUS result = CompleteLaunch(path, fs_path);
 
-  if (XSUCCEEDED(result)) {
-    kernel_state_->deployment_type_ = XDeploymentType::kInstalledToHDD;
-    auto title_id = kernel_state_->title_id();
-    if (!kernel::IsSystemTitle(title_id)) {
-      // Assumption that any loaded game is loaded as a disc.
-      kernel_state_->deployment_type_ = XDeploymentType::kOpticalDisc;
-    } else {
-      const std::string mount_path = xe::path_to_utf8(
-          std::filesystem::path(kernel_state_->GetExecutableModule()->path())
-              .parent_path());
+  if (XFAILED(result)) {
+    return result;
+  }
 
-      // System related symlinks
-      file_system_->RegisterSymbolicLink("media:", mount_path);
-      file_system_->RegisterSymbolicLink("font:", mount_path);
-    }
+  kernel_state_->deployment_type_ = XDeploymentType::kInstalledToHDD;
+
+  if (!kernel::IsSystemTitle(kernel_state_->title_id())) {
+    return result;
+  }
+
+  const std::string mount_path = xe::path_to_utf8(
+      std::filesystem::path(kernel_state_->GetExecutableModule()->path())
+          .parent_path());
+
+  // System related symlinks
+  file_system_->RegisterSymbolicLink("media:", mount_path);
+  file_system_->RegisterSymbolicLink("font:", mount_path);
+
+  auto module = kernel_state_->LoadUserModule("xam.xex");
+  if (!module) {
+    module = kernel_state_->LoadUserModule("$flash_xam.xex");
+  }
+
+  if (module) {
+    result = kernel_state_->FinishLoadingUserModule(module, false);
   }
   return result;
 }

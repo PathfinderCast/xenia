@@ -14,6 +14,7 @@
 #include <variant>
 #include <vector>
 
+#include "xenia/base/string_util.h"
 #include "xenia/xbox.h"
 
 namespace xe {
@@ -84,6 +85,29 @@ class UserData {
     return {extended_data_.data(), extended_data_.size()};
   }
 
+  UserDataTypes get_host_data() const {
+    if (data_.type == X_USER_DATA_TYPE::INT32) {
+      return data_.data.s32;
+    }
+
+    if (data_.type == X_USER_DATA_TYPE::DATETIME) {
+      return data_.data.s64;
+    }
+
+    if (data_.type == X_USER_DATA_TYPE::WSTRING) {
+      if (get_extended_data().empty()) {
+        return std::u16string();
+      }
+
+      const char16_t* str_begin =
+          reinterpret_cast<const char16_t*>(get_extended_data().data());
+
+      return string_util::read_u16string_and_swap(str_begin);
+    }
+
+    return 0;
+  }
+
   bool is_valid_type() const {
     return data_.type >= X_USER_DATA_TYPE::CONTEXT &&
            data_.type <= X_USER_DATA_TYPE::DATETIME;
@@ -152,9 +176,7 @@ class UserData {
   }
 
  protected:
-  ~UserData();
-
-  UserData();
+  UserData() = default;
   UserData(const UserData& user_data);
 
   // From host
@@ -169,6 +191,8 @@ class UserData {
   // For data from GPD
   UserData(const X_USER_DATA_TYPE data_type, const X_USER_DATA_UNION* user_data,
            std::span<const uint8_t> extended_data);
+
+  ~UserData() = default;
 
   X_USER_DATA data_ = {};
   std::vector<uint8_t> extended_data_ = {};

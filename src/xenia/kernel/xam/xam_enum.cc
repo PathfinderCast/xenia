@@ -16,10 +16,6 @@
 #include "xenia/kernel/xenumerator.h"
 #include "xenia/xbox.h"
 
-#if XE_PLATFORM_WIN32
-#include "xenia/base/platform_win.h"
-#endif
-
 #include "third_party/fmt/include/fmt/format.h"
 
 namespace xe {
@@ -29,8 +25,6 @@ namespace xam {
 uint32_t xeXamEnumerate(uint32_t handle, uint32_t flags, lpvoid_t buffer_ptr,
                         uint32_t buffer_size, uint32_t* items_returned,
                         uint32_t overlapped_ptr) {
-  assert_true(flags == 0);
-
   auto e = kernel_state()->object_table()->LookupObject<XEnumerator>(handle);
   if (!e) {
     return X_ERROR_INVALID_HANDLE;

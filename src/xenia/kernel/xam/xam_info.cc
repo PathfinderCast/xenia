@@ -7,8 +7,6 @@
  ******************************************************************************
  */
 
-#include <xenia/kernel/xboxkrnl/xboxkrnl_error.h>
-#include <xenia/kernel/xboxkrnl/xboxkrnl_modules.h>
 #include "xenia/base/cvar.h"
 #include "xenia/base/logging.h"
 #include "xenia/base/string_util.h"
@@ -18,7 +16,9 @@
 #include "xenia/kernel/util/shim_utils.h"
 #include "xenia/kernel/xam/xam_module.h"
 #include "xenia/kernel/xam/xam_private.h"
+#include "xenia/kernel/xboxkrnl/xboxkrnl_error.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_memory.h"
+#include "xenia/kernel/xboxkrnl/xboxkrnl_modules.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_threading.h"
 #include "xenia/kernel/xenumerator.h"
 #include "xenia/kernel/xthread.h"
@@ -58,7 +58,7 @@ namespace xam {
 // https://github.com/tpn/winsdk-10/blob/master/Include/10.0.14393.0/km/wdm.h#L15539
 typedef enum _MODE { KernelMode, UserMode, MaximumMode } MODE;
 
-dword_result_t XamFeatureEnabled_entry(dword_t unk) { return 0; }
+dword_result_t XamFeatureEnabled_entry(dword_t app_id) { return 0; }
 DECLARE_XAM_EXPORT1(XamFeatureEnabled, kNone, kStub);
 
 dword_result_t XamGetStagingMode_entry() { return cvars::staging_mode; }
@@ -107,7 +107,7 @@ void XamFormatDateString_entry(dword_t locale_format, qword_t filetime,
 }
 DECLARE_XAM_EXPORT1(XamFormatDateString, kNone, kImplemented);
 
-void XamFormatTimeString_entry(dword_t unk, qword_t filetime,
+void XamFormatTimeString_entry(dword_t user_index, qword_t filetime,
                                lpvoid_t output_buffer, dword_t output_count) {
   output_buffer.Zero(output_count * sizeof(char16_t));
 
@@ -163,8 +163,10 @@ dword_result_t XamBuildGamercardResourceLocator_entry(lpu16string_t filename,
 
   // If you're running an app that'll need them, make sure to extract xam.xex
   // resources with xextool ("xextool -d . xam.xex") and add a .xzp extension.
+  const auto xam_module = kernel_state()->GetModule("xam", true);
 
-  return keXamBuildResourceLocator(0, u"gamercrd", filename.value(), buffer_ptr,
+  return keXamBuildResourceLocator(xam_module ? xam_module->hmodule_ptr() : 0,
+                                   u"gamercrd", filename.value(), buffer_ptr,
                                    buffer_count);
 }
 DECLARE_XAM_EXPORT1(XamBuildGamercardResourceLocator, kNone, kImplemented);
@@ -172,8 +174,11 @@ DECLARE_XAM_EXPORT1(XamBuildGamercardResourceLocator, kNone, kImplemented);
 dword_result_t XamBuildSharedSystemResourceLocator_entry(lpu16string_t filename,
                                                          lpvoid_t buffer_ptr,
                                                          dword_t buffer_count) {
+  const auto xam_module = kernel_state()->GetModule("xam", true);
+
   // see notes inside XamBuildGamercardResourceLocator above
-  return keXamBuildResourceLocator(0, u"shrdres", filename.value(), buffer_ptr,
+  return keXamBuildResourceLocator(xam_module ? xam_module->hmodule_ptr() : 0,
+                                   u"shrdres", filename.value(), buffer_ptr,
                                    buffer_count);
 }
 DECLARE_XAM_EXPORT1(XamBuildSharedSystemResourceLocator, kNone, kImplemented);
@@ -525,22 +530,20 @@ dword_result_t GetModuleHandleA_entry(lpstring_t module_name) {
 }
 DECLARE_XAM_EXPORT1(GetModuleHandleA, kNone, kImplemented);
 
-dword_result_t XapipCreateThread_entry(lpdword_t lpThreadAttributes,
-                                       dword_t dwStackSize,
-                                       lpvoid_t lpStartAddress,
-                                       lpvoid_t lpParameter,
-                                       dword_t dwCreationFlags, dword_t unkn,
-                                       lpdword_t lpThreadId) {
-  uint32_t flags = (dwCreationFlags >> 2) & 1;
+dword_result_t XapipCreateThread_entry(
+    lpdword_t thread_attributes, dword_t stack_size, lpvoid_t start_address,
+    lpvoid_t parameter, dword_t creation_flags, dword_t thread_processor,
+    lpdword_t thread_id) {
+  uint32_t flags = (creation_flags >> 2) & 1;
 
-  if (unkn != -1) {
-    flags |= 1 << unkn << 24;
+  if (thread_processor != -1) {
+    flags |= 1 << thread_processor << 24;
   }
 
   xe::be<uint32_t> result = 0;
 
   const X_STATUS error_code = xe::kernel::xboxkrnl::ExCreateThread(
-      &result, dwStackSize, lpThreadId, lpStartAddress, lpParameter, 0, flags);
+      &result, stack_size, thread_id, start_address, parameter, 0, flags);
 
   if (XFAILED(error_code)) {
     RtlSetLastNTError_entry(error_code);
@@ -727,6 +730,18 @@ dword_result_t XamIsXbox1TitleId_entry(dword_t title_id) {
   return IsOriginalXboxTitle(title_id);
 }
 DECLARE_XAM_EXPORT1(XamIsXbox1TitleId, kNone, kImplemented);
+
+dword_result_t XamIsChildAccountSignedIn_entry() {
+  for (uint32_t i = 0; i < XUserMaxUserCount; i++) {
+    const auto& profile = kernel_state()->xam_state()->GetUserProfile(i);
+    if (profile && profile->IsParentalControlled()) {
+      return true;
+    }
+  }
+
+  return false;
+}
+DECLARE_XAM_EXPORT1(XamIsChildAccountSignedIn, kNone, kImplemented);
 
 void XamSetActiveDashAppInfo_entry(pointer_t<X_DASH_APP_INFO> dash_app) {
   if (!dash_app) {

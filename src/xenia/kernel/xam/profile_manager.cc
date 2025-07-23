@@ -9,10 +9,6 @@
 
 #include "xenia/kernel/xam/profile_manager.h"
 
-#include <filesystem>
-#include <vector>
-
-#include "third_party/fmt/include/fmt/format.h"
 #include "xenia/base/logging.h"
 #include "xenia/emulator.h"
 #include "xenia/hid/input_system.h"
@@ -110,7 +106,9 @@ ProfileManager::ProfileManager(KernelState* kernel_state,
   logged_profiles_.clear();
   accounts_.clear();
 
-  LoadAccounts(FindProfiles());
+  for (const auto account_xuid : FindProfiles()) {
+    LoadAccount(account_xuid);
+  }
 
   if (!cvars::logged_profile_slot_0_xuid.empty()) {
     Login(xe::string_util::from_string<uint64_t>(
@@ -137,9 +135,19 @@ ProfileManager::ProfileManager(KernelState* kernel_state,
   }
 }
 
-ProfileManager::~ProfileManager() {}
+void ProfileManager::ReloadProfile(const uint64_t xuid) {
+  if (accounts_.contains(xuid)) {
+    accounts_.erase(xuid);
+  }
 
-void ProfileManager::ReloadProfiles() { LoadAccounts(FindProfiles()); }
+  LoadAccount(xuid);
+}
+
+void ProfileManager::ReloadProfiles() {
+  for (const auto account_xuid : FindProfiles()) {
+    LoadAccount(account_xuid);
+  }
+}
 
 UserProfile* ProfileManager::GetProfile(const uint64_t xuid) const {
   const uint8_t user_index = GetUserIndexAssignedToProfile(xuid);
@@ -226,34 +234,8 @@ bool ProfileManager::LoadAccount(const uint64_t xuid) {
   // We need it only when we want to login into this account!
   DismountProfile(xuid);
 
-  accounts_.insert({xuid, tmp_acct});
+  accounts_.insert_or_assign(xuid, tmp_acct);
   return true;
-}
-
-void ProfileManager::LoadAccounts(const std::vector<uint64_t> profiles_xuids) {
-  for (const auto& path : profiles_xuids) {
-    LoadAccount(path);
-  }
-}
-
-void ProfileManager::ModifyGamertag(const uint64_t xuid, std::string gamertag) {
-  if (!accounts_.count(xuid)) {
-    return;
-  }
-
-  xe::X_XAMACCOUNTINFO* account = &accounts_[xuid];
-
-  std::u16string gamertag_u16 = xe::to_utf16(gamertag);
-
-  string_util::copy_truncating(account->gamertag, gamertag_u16,
-                               sizeof(account->gamertag));
-
-  if (!MountProfile(xuid)) {
-    return;
-  }
-
-  UpdateAccount(xuid, account);
-  DismountProfile(xuid);
 }
 
 bool ProfileManager::MountProfile(const uint64_t xuid, std::string mount_path) {
@@ -282,7 +264,7 @@ bool ProfileManager::DismountProfile(const uint64_t xuid) {
 
 void ProfileManager::Login(const uint64_t xuid, const uint8_t user_index,
                            bool notify) {
-  if (logged_profiles_.size() >= 4 && user_index >= XUserMaxUserCount) {
+  if (logged_profiles_.size() >= XUserMaxUserCount) {
     XELOGE(
         "Cannot login account with XUID: {:016X} due to lack of free slots "
         "(Max 4 accounts at once)",
@@ -567,6 +549,9 @@ bool ProfileManager::UpdateAccount(const uint64_t xuid,
       std::span<uint8_t>(encrypted_data.data(), encrypted_data.size()), 0,
       &written_bytes);
   output_file->Destroy();
+
+  // Refresh the in-memory account data
+  accounts_.insert_or_assign(xuid, *account);
   return true;
 }
 

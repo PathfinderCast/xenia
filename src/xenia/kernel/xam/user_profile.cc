@@ -9,9 +9,6 @@
 
 #include "xenia/kernel/xam/user_profile.h"
 
-#include <ranges>
-#include <sstream>
-
 #include "third_party/fmt/include/fmt/format.h"
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/util/shim_utils.h"
@@ -21,7 +18,8 @@ namespace xe {
 namespace kernel {
 namespace xam {
 
-UserProfile::UserProfile(uint64_t xuid, X_XAMACCOUNTINFO* account_info)
+UserProfile::UserProfile(const uint64_t xuid,
+                         const X_XAMACCOUNTINFO* account_info)
     : xuid_(xuid), account_info_(*account_info), profile_images_() {
   // 58410A1F checks the user XUID against a mask of 0x00C0000000000000 (3<<54),
   // if non-zero, it prevents the user from playing the game.
@@ -93,7 +91,32 @@ void UserProfile::LoadProfileIcon(XTileType tile_type) {
                  &written_bytes);
   file->Destroy();
 
-  profile_images_.insert({tile_type, data});
+  profile_images_.insert_or_assign(tile_type, data);
+}
+
+void UserProfile::WriteProfileIcon(XTileType tile_type,
+                                   std::span<const uint8_t> icon_data) {
+  const std::string path =
+      fmt::format("User_{:016X}:\\{}", xuid_, kTileFileNames.at(tile_type));
+
+  vfs::File* file = nullptr;
+  vfs::FileAction action;
+
+  const X_STATUS result = kernel_state()->file_system()->OpenFile(
+      nullptr, path, vfs::FileDisposition::kOverwriteIf,
+      vfs::FileAccess::kGenericAll, false, true, &file, &action);
+
+  if (result != X_STATUS_SUCCESS) {
+    return;
+  }
+
+  size_t written_bytes = 0;
+
+  file->WriteSync({icon_data.data(), icon_data.size()}, 0, &written_bytes);
+  file->Destroy();
+
+  profile_images_.insert_or_assign(
+      tile_type, std::vector<uint8_t>(icon_data.begin(), icon_data.end()));
 }
 
 std::vector<uint8_t> UserProfile::LoadGpd(const uint32_t title_id) {

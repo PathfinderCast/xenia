@@ -29,8 +29,10 @@ includedirs({
 defines({
   "_UNICODE",
   "UNICODE",
+  "USE_CPP17", -- Tabulate
 })
 
+cdialect("C17")
 cppdialect("C++20")
 exceptionhandling("On")
 rtti("On")
@@ -61,12 +63,12 @@ filter("configurations:Checked")
     "DEBUG",
   })
 
-filter({"configurations:Checked", "platforms:Windows"})
+filter({"configurations:Checked", "platforms:Windows"}) -- "toolset:msc"
   buildoptions({
     "/RTCsu",           -- Full Run-Time Checks.
   })
 
-filter({"configurations:Checked", "platforms:Linux"})
+filter({"configurations:Checked or Debug", "platforms:Linux"})
   defines({
     "_GLIBCXX_DEBUG",   -- libstdc++ debug mode
   })
@@ -79,10 +81,10 @@ filter("configurations:Debug")
     "_NO_DEBUG_HEAP=1",
   })
 
-filter({"configurations:Debug", "platforms:Linux"})
-  defines({
-    "_GLIBCXX_DEBUG",   -- make dbg symbols work on some distros
-  })
+--filter({"configurations:Debug", "platforms:Linux"})
+--  defines({
+--    "_GLIBCXX_DEBUG",   -- make dbg symbols work on some distros
+--  })
 
 filter("configurations:Release")
   runtime("Release")
@@ -92,6 +94,9 @@ filter("configurations:Release")
   })
   optimize("Speed")
   symbols("Off")
+  flags({
+    "NoBufferSecurityCheck"
+  })
   inlining("Auto")
   editandcontinue("Off")
   -- Not using floatingpoint("Fast") - NaN checks are used in some places
@@ -101,24 +106,22 @@ filter("configurations:Release")
   -- (such as constant propagation) emulation as predictable as possible,
   -- including handling of specials since games make assumptions about them.
 
-filter({"configurations:Release", "platforms:Windows"})
+filter({"configurations:Release", "platforms:Windows"}) -- "toolset:msc"
   linktimeoptimization("On")
   symbols("On")
-  flags({
-    "NoBufferSecurityCheck"
-  })
   buildoptions({
     "/Gw",
     "/Ob3",
+--    "/Qpar",   -- TODO: Test this.
   })
 
 filter("platforms:Linux")
   system("linux")
   toolset("clang")
   vectorextensions("AVX2")
-  buildoptions({
-    -- "-mlzcnt",  -- (don't) Assume lzcnt is supported.
-  })
+  --buildoptions({
+  --    "-mlzcnt",   -- (don't) Assume lzcnt is supported.
+  --})
   pkg_config.all("gtk+-x11-3.0")
   links({
     "stdc++fs",
@@ -131,15 +134,23 @@ filter("platforms:Linux")
 filter({"platforms:Linux", "kind:*App"})
   linkgroups("On")
 
-filter({"platforms:Linux", "language:C++", "toolset:gcc"})
+filter({"language:C++", "toolset:clang or gcc"}) -- "platforms:Linux"
   disablewarnings({
-    "unused-result",
-    "deprecated-volatile",
     "switch",
-    "deprecated-enum-enum-conversion",
+    "attributes",
   })
 
-filter({"platforms:Linux", "toolset:gcc"})
+filter({"language:C++", "toolset:gcc"}) -- "platforms:Linux"
+  disablewarnings({
+    "unused-result",
+    "volatile",
+    "template-id-cdtor",
+    "return-type",
+    "deprecated",
+  })
+
+filter("toolset:gcc") -- "platforms:Linux"
+  removefatalwarnings("All") -- HACK
   if ARCH == "ppc64" then
     buildoptions({
       "-m32",
@@ -149,20 +160,35 @@ filter({"platforms:Linux", "toolset:gcc"})
       "-m32",
       "-mpowerpc64"
     })
+  else
+    buildoptions({
+      "-fpermissive", -- HACK
+    })
+    linkoptions({
+      "-fpermissive", -- HACK
+    })
   end
 
-filter({"platforms:Linux", "language:C++", "toolset:clang"})
+filter({"language:C++", "toolset:clang"}) -- "platforms:Linux"
   disablewarnings({
     "deprecated-register",
     "deprecated-volatile",
-    "switch",
     "deprecated-enum-enum-conversion",
-    "attributes",
   })
-filter({"platforms:Linux", "language:C++", "toolset:clang", "files:*.cc or *.cpp"})
-  buildoptions({
-    "-stdlib=libstdc++",
-    "-std=c++20", -- clang doesn't respect cppdialect(?)
+CLANG_BIN = os.getenv("CC") or _OPTIONS["cc"] or "clang"
+if os.istarget("linux") and string.contains(CLANG_BIN, "clang") then
+  if tonumber(string.match(os.outputof(CLANG_BIN.." --version"), "version (%d%d)")) >= 20 then
+    filter({"language:C++", "toolset:clang"}) -- "platforms:Linux"
+      disablewarnings({
+        "deprecated-literal-operator",   -- Needed only for tabulate
+        "nontrivial-memcall",
+      })
+  end
+end
+
+filter({"language:C", "toolset:clang or gcc"}) -- "platforms:Linux"
+  disablewarnings({
+    "implicit-function-declaration",
   })
 
 filter("platforms:Android-*")
@@ -188,11 +214,11 @@ filter("platforms:Windows")
   buildoptions({
     "/utf-8",   -- 'build correctly on systems with non-Latin codepages'.
     -- Disable warnings
-    "/wd4201",  -- Nameless struct/unions are ok.
+    "/wd4201",   -- Nameless struct/unions are ok.
   })
   flags({
-    "MultiProcessorCompile",  -- Multiprocessor compilation.
-    "NoMinimalRebuild",       -- Required for /MP above.
+    "MultiProcessorCompile",   -- Multiprocessor compilation.
+    "NoMinimalRebuild",        -- Required for /MP above.
   })
 
   defines({
@@ -253,10 +279,7 @@ workspace("xenia")
       -- 10.0.15063.0: ID3D12GraphicsCommandList1::SetSamplePositions.
       -- 10.0.19041.0: D3D12_HEAP_FLAG_CREATE_NOT_ZEROED.
       -- 10.0.22000.0: DWMWA_WINDOW_CORNER_PREFERENCE.
-      filter("action:vs2017")
-        systemversion("10.0.22000.0")
-      filter("action:vs2019")
-        systemversion("10.0")
+      systemversion("latest")
       filter({})
     end
   end

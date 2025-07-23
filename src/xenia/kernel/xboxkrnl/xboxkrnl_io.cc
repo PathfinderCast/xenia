@@ -8,9 +8,6 @@
  */
 
 #include "xenia/base/logging.h"
-#include "xenia/base/memory.h"
-#include "xenia/base/mutex.h"
-#include "xenia/cpu/processor.h"
 #include "xenia/kernel/info/file.h"
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/util/shim_utils.h"
@@ -160,7 +157,7 @@ dword_result_t NtReadFile_entry(dword_t file_handle, dword_t event_handle,
       // though were are completing immediately.
       // Low bit probably means do not queue to IO ports.
       if ((uint32_t)apc_routine_ptr & ~1) {
-        if (apc_context) {
+        if (apc_context && result == X_STATUS_SUCCESS) {
           auto thread = XThread::GetCurrentThread();
           thread->EnqueueApc(static_cast<uint32_t>(apc_routine_ptr) & ~1u,
                              apc_context, io_status_block, 0);

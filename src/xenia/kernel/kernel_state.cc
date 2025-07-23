@@ -9,20 +9,12 @@
 
 #include "xenia/kernel/kernel_state.h"
 
-#include <string>
-
-#include "third_party/fmt/include/fmt/format.h"
-#include "xenia/base/assert.h"
 #include "xenia/base/byte_stream.h"
 #include "xenia/base/logging.h"
-#include "xenia/base/string.h"
-#include "xenia/cpu/processor.h"
 #include "xenia/emulator.h"
 #include "xenia/hid/input_system.h"
 #include "xenia/kernel/user_module.h"
 #include "xenia/kernel/util/shim_utils.h"
-#include "xenia/kernel/xam/xam_module.h"
-#include "xenia/kernel/xam/xdbf/xdbf_io.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_memory.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_module.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_ob.h"
@@ -49,7 +41,7 @@ DECLARE_string(cl);
 namespace xe {
 namespace kernel {
 
-constexpr uint32_t kDeferredOverlappedDelayMillis = 100;
+constexpr std::chrono::milliseconds kDeferredOverlappedDelayMillis(100);
 
 // This is a global object initialized with the XboxkrnlModule.
 // It references the current kernel state object that all kernel methods should
@@ -897,6 +889,11 @@ void KernelState::RegisterNotifyListener(XNotifyListener* listener) {
     listener->EnqueueNotification(kXNotificationDvdDriveTrayStateChanged,
                                   X_DVD_DISC_STATE::XBOX_360_GAME_DISC);
   }
+  if (listener->mask() & kXNotifyLive) {
+    listener->EnqueueNotification(kXNotificationLiveConnectionChanged,
+                                  0x80151802L);
+    listener->EnqueueNotification(kXNotificationLiveLinkStateChanged, 0);
+  }
 }
 
 void KernelState::UnregisterNotifyListener(XNotifyListener* listener) {
@@ -1024,8 +1021,8 @@ void KernelState::CompleteOverlappedDeferredEx(
     if (pre_callback) {
       pre_callback();
     }
-    xe::threading::Sleep(
-        std::chrono::milliseconds(kDeferredOverlappedDelayMillis));
+    // 5454082B infinitely loads free roam in netplay without sleep.
+    xe::threading::Sleep(kDeferredOverlappedDelayMillis);
     uint32_t extended_error, length;
     auto result = completion_callback(extended_error, length);
     CompleteOverlappedEx(overlapped_ptr, result, extended_error, length);

@@ -8,20 +8,18 @@
  */
 
 #include "xenia/base/logging.h"
-#include "xenia/base/math.h"
-#include "xenia/base/string_util.h"
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/util/shim_utils.h"
 #include "xenia/kernel/xam/user_profile.h"
 #include "xenia/kernel/xam/user_settings.h"
 #include "xenia/kernel/xam/xam_private.h"
 #include "xenia/kernel/xenumerator.h"
-#include "xenia/kernel/xthread.h"
 #include "xenia/xbox.h"
 
 #include "third_party/stb/stb_image.h"
 
 DECLARE_int32(user_language);
+DECLARE_int32(user_country);
 
 namespace xe {
 namespace kernel {
@@ -67,7 +65,7 @@ X_HRESULT_result_t XamUserGetXUID_entry(dword_t user_index, dword_t type_mask,
 DECLARE_XAM_EXPORT1(XamUserGetXUID, kUserProfiles, kImplemented);
 
 dword_result_t XamUserGetIndexFromXUID_entry(qword_t xuid, dword_t flags,
-                                             pointer_t<uint32_t> index) {
+                                             lpdword_t index) {
   if (!index) {
     return X_E_INVALIDARG;
   }
@@ -256,82 +254,80 @@ uint32_t XamUserReadProfileSettingsEx(uint32_t title_id, uint32_t user_index,
     return X_ERROR_INSUFFICIENT_BUFFER;
   }
 
-  auto user_profile = kernel_state()->xam_state()->GetUserProfile(user_index);
+  auto run = [=](uint32_t& extended_error, uint32_t& length) {
+    auto user_profile = kernel_state()->xam_state()->GetUserProfile(user_index);
 
-  if (!user_profile && !xuids) {
-    return X_ERROR_NO_SUCH_USER;
-  }
-
-  if (xuids) {
-    uint64_t user_xuid = static_cast<uint64_t>(xuids[0]);
-    if (!kernel_state()->xam_state()->IsUserSignedIn(user_xuid)) {
+    if (!user_profile && !xuids) {
       return X_ERROR_NO_SUCH_USER;
     }
-    user_profile = kernel_state()->xam_state()->GetUserProfile(user_xuid);
-  }
 
-  if (!user_profile) {
-    return X_ERROR_NO_SUCH_USER;
-  }
-
-  // First call asks for size (fill buffer_size_ptr).
-  // Second call asks for buffer contents with that size.
-
-  bool any_missing = false;
-  for (uint32_t i = 0; i < setting_count; ++i) {
-    auto setting_id = static_cast<uint32_t>(setting_ids[i]);
-    if (!UserSetting::is_setting_valid(setting_id)) {
-      XELOGE(
-          "xeXamUserReadProfileSettingsEx requested unimplemented "
-          "setting "
-          "{:08X}",
-          setting_id);
-      any_missing = true;
-    }
-  }
-  if (any_missing) {
-    return X_ERROR_INVALID_PARAMETER;
-    // TODO(benvanik): don't fail? most games don't even check!
-  }
-
-  auto out_header = reinterpret_cast<X_USER_READ_PROFILE_SETTINGS*>(buffer);
-  auto out_setting = reinterpret_cast<X_USER_PROFILE_SETTING*>(&out_header[1]);
-  out_header->setting_count = static_cast<uint32_t>(setting_count);
-  out_header->settings_ptr =
-      kernel_state()->memory()->HostToGuestVirtual(out_setting);
-
-  uint32_t additional_data_buffer_ptr =
-      out_header->settings_ptr +
-      (setting_count * sizeof(X_USER_PROFILE_SETTING));
-
-  std::fill_n(out_setting, setting_count, X_USER_PROFILE_SETTING{});
-
-  for (uint32_t n = 0; n < setting_count; ++n) {
-    uint32_t setting_id = setting_ids[n];
-
-    const bool is_valid =
-        kernel_state()->xam_state()->user_tracker()->GetUserSetting(
-            user_profile->xuid(),
-            title_id ? title_id : kernel_state()->title_id(), setting_id,
-            out_setting, additional_data_buffer_ptr);
-
-    if (is_valid) {
-      if (xuids) {
-        out_setting->xuid = user_profile->xuid();
-      } else {
-        out_setting->xuid = -1;
-        out_setting->user_index = user_index;
+    if (xuids) {
+      uint64_t user_xuid = static_cast<uint64_t>(xuids[0]);
+      if (!kernel_state()->xam_state()->IsUserSignedIn(user_xuid)) {
+        return X_ERROR_NO_SUCH_USER;
       }
+      user_profile = kernel_state()->xam_state()->GetUserProfile(user_xuid);
     }
-    ++out_setting;
+
+    if (!user_profile) {
+      return X_ERROR_NO_SUCH_USER;
+    }
+
+    auto out_header = reinterpret_cast<X_USER_READ_PROFILE_SETTINGS*>(buffer);
+    auto out_setting =
+        reinterpret_cast<X_USER_PROFILE_SETTING*>(&out_header[1]);
+    out_header->setting_count = static_cast<uint32_t>(setting_count);
+    out_header->settings_ptr =
+        kernel_state()->memory()->HostToGuestVirtual(out_setting);
+
+    uint32_t additional_data_buffer_ptr =
+        out_header->settings_ptr +
+        (setting_count * sizeof(X_USER_PROFILE_SETTING));
+
+    std::fill_n(out_setting, setting_count, X_USER_PROFILE_SETTING{});
+
+    for (uint32_t n = 0; n < setting_count; ++n) {
+      const uint32_t setting_id = setting_ids[n];
+      if (!UserSetting::is_setting_valid(setting_id)) {
+        if (setting_id != 0) {
+          XELOGE(
+              "xeXamUserReadProfileSettingsEx requested unimplemented setting "
+              "{:08X}",
+              setting_id);
+        }
+        --out_header->setting_count;
+        continue;
+      }
+
+      const bool is_valid =
+          kernel_state()->xam_state()->user_tracker()->GetUserSetting(
+              user_profile->xuid(),
+              title_id ? title_id : kernel_state()->title_id(), setting_id,
+              out_setting, additional_data_buffer_ptr);
+
+      if (is_valid) {
+        if (xuids) {
+          out_setting->xuid = user_profile->xuid();
+        } else {
+          out_setting->xuid = -1;
+          out_setting->user_index = user_index;
+        }
+      }
+      ++out_setting;
+    }
+
+    extended_error = X_HRESULT_FROM_WIN32(X_STATUS_SUCCESS);
+    length = 0;
+    return X_STATUS_SUCCESS;
+  };
+
+  if (!overlapped_ptr) {
+    uint32_t extended_error, length;
+    return run(extended_error, length);
   }
 
-  if (overlapped_ptr) {
-    kernel_state()->CompleteOverlappedImmediate(overlapped_ptr.value(),
-                                                X_STATUS_SUCCESS);
-    return X_ERROR_IO_PENDING;
-  }
-  return X_STATUS_SUCCESS;
+  kernel_state()->CompleteOverlappedDeferredEx(run, overlapped_ptr);
+  return X_ERROR_IO_PENDING;
 }
 
 dword_result_t XamUserReadProfileSettings_entry(
@@ -461,8 +457,21 @@ dword_result_t XamUserContentRestrictionCheckAccess_entry(
 }
 DECLARE_XAM_EXPORT1(XamUserContentRestrictionCheckAccess, kUserProfiles, kStub);
 
-dword_result_t XamUserIsOnlineEnabled_entry(dword_t user_index) { return 1; }
-DECLARE_XAM_EXPORT1(XamUserIsOnlineEnabled, kUserProfiles, kStub);
+dword_result_t XamUserIsOnlineEnabled_entry(dword_t user_index) {
+  if (user_index >= XUserMaxUserCount) {
+    return 0;
+  }
+
+  if (!kernel_state()->xam_state()->IsUserSignedIn(user_index)) {
+    return 0;
+  }
+
+  return kernel_state()
+      ->xam_state()
+      ->GetUserProfile(user_index)
+      ->IsLiveEnabled();
+}
+DECLARE_XAM_EXPORT1(XamUserIsOnlineEnabled, kUserProfiles, kImplemented);
 
 dword_result_t XamUserGetMembershipTier_entry(dword_t user_index) {
   if (user_index >= XUserMaxUserCount) {
@@ -473,15 +482,36 @@ dword_result_t XamUserGetMembershipTier_entry(dword_t user_index) {
     return X_ERROR_NO_SUCH_USER;
   }
 
-  return X_XAMACCOUNTINFO::AccountSubscriptionTier::kSubscriptionTierGold;
+  return kernel_state()
+      ->xam_state()
+      ->GetUserProfile(user_index)
+      ->GetSubscriptionTier();
 }
-DECLARE_XAM_EXPORT1(XamUserGetMembershipTier, kUserProfiles, kStub);
+DECLARE_XAM_EXPORT1(XamUserGetMembershipTier, kUserProfiles, kImplemented);
 
-dword_result_t XamUserAreUsersFriends_entry(dword_t user_index, dword_t unk1,
-                                            dword_t unk2, lpdword_t out_value,
-                                            dword_t overlapped_ptr) {
-  uint32_t are_friends = 0;
-  X_RESULT result;
+dword_result_t XamUserGetMembershipTierFromXUID_entry(qword_t xuid) {
+  const auto profile = kernel_state()->xam_state()->GetUserProfile(xuid);
+  if (!profile) {
+    return 0;
+  }
+
+  return profile->GetSubscriptionTier();
+}
+DECLARE_XAM_EXPORT1(XamUserGetMembershipTierFromXUID, kUserProfiles,
+                    kImplemented);
+
+dword_result_t XamUserAreUsersFriends_entry(
+    dword_t user_index, lpqword_t xuids_ptr, dword_t xuids_count,
+    lpdword_t are_friends_ptr, pointer_t<XAM_OVERLAPPED> overlapped_ptr) {
+  X_RESULT result = X_ERROR_SUCCESS;
+  bool are_friends = false;
+
+  // 415607D2 provides are_friends_ptr and overlapped_ptr possibly a bug?
+  assert_true(!overlapped_ptr);
+
+  if (are_friends_ptr) {
+    *are_friends_ptr = 0;
+  }
 
   if (user_index >= XUserMaxUserCount) {
     result = X_ERROR_INVALID_PARAMETER;
@@ -489,38 +519,37 @@ dword_result_t XamUserAreUsersFriends_entry(dword_t user_index, dword_t unk1,
     if (kernel_state()->xam_state()->IsUserSignedIn(user_index)) {
       const auto& user_profile =
           kernel_state()->xam_state()->GetUserProfile(user_index);
-      if (user_profile->signin_state() == 0) {
+
+      // Check if we are signed into live
+      if (user_profile->signin_state() != 2) {
         result = X_ERROR_NOT_LOGGED_ON;
       } else {
         // No friends!
-        are_friends = 0;
+        are_friends = true;
         result = X_ERROR_SUCCESS;
       }
     } else {
-      // Only support user 0.
-      result =
-          X_ERROR_NO_SUCH_USER;  // if user is local -> X_ERROR_NOT_LOGGED_ON
+      result = X_ERROR_NO_SUCH_USER;
     }
   }
 
-  if (out_value) {
-    assert_true(!overlapped_ptr);
-    *out_value = result == X_ERROR_SUCCESS ? are_friends : 0;
-    return result;
-  } else if (overlapped_ptr) {
-    assert_true(!out_value);
+  if (overlapped_ptr) {
+    assert_true(!are_friends_ptr);
     kernel_state()->CompleteOverlappedImmediateEx(
         overlapped_ptr,
         result == X_ERROR_SUCCESS ? X_ERROR_SUCCESS : X_ERROR_FUNCTION_FAILED,
-        X_HRESULT_FROM_WIN32(result),
-        result == X_ERROR_SUCCESS ? are_friends : 0);
-    return X_ERROR_IO_PENDING;
-  } else {
-    assert_always();
-    return X_ERROR_INVALID_PARAMETER;
+        X_HRESULT_FROM_WIN32(result), are_friends);
+
+    return X_ERROR_SUCCESS;
   }
+
+  if (!overlapped_ptr && are_friends_ptr) {
+    *are_friends_ptr = are_friends;
+  }
+
+  return result;
 }
-DECLARE_XAM_EXPORT1(XamUserAreUsersFriends, kUserProfiles, kStub);
+DECLARE_XAM_EXPORT1(XamUserAreUsersFriends, kUserProfiles, kSketchy);
 
 dword_result_t XamUserCreateAchievementEnumerator_entry(
     dword_t title_id, dword_t user_index, qword_t xuid, dword_t flags,
@@ -868,18 +897,40 @@ dword_result_t XamUserIsUnsafeProgrammingAllowed_entry(dword_t user_index,
 DECLARE_XAM_EXPORT1(XamUserIsUnsafeProgrammingAllowed, kUserProfiles, kStub);
 
 dword_result_t XamUserGetSubscriptionType_entry(dword_t user_index,
-                                                dword_t unk2, dword_t unk3) {
+                                                lpdword_t subscription_ptr,
+                                                lpdword_t r5,
+                                                dword_t overlapped_ptr) {
   if (user_index >= XUserMaxUserCount) {
     return X_ERROR_INVALID_PARAMETER;
   }
 
-  if (!unk2 || !unk3) {
+  if (!subscription_ptr || !r5) {
     return X_E_INVALIDARG;
   }
+
+  auto user = kernel_state()->xam_state()->GetUserProfile(user_index);
+  if (!user) {
+    return X_ERROR_INVALID_PARAMETER;
+  }
+
+  *subscription_ptr = user->GetSubscriptionTier();
+  *r5 = 0x0;
 
   return X_ERROR_SUCCESS;
 }
 DECLARE_XAM_EXPORT1(XamUserGetSubscriptionType, kUserProfiles, kStub);
+
+dword_result_t XamUserGetCachedUserFlags_entry(dword_t user_index) {
+  if (!kernel_state()->xam_state()->IsUserSignedIn(user_index)) {
+    return 0;
+  }
+
+  const auto& user_profile =
+      kernel_state()->xam_state()->GetUserProfile(user_index);
+
+  return user_profile->GetCachedFlags();
+}
+DECLARE_XAM_EXPORT1(XamUserGetCachedUserFlags, kUserProfiles, kImplemented);
 
 dword_result_t XamUserGetUserFlags_entry(dword_t user_index) {
   if (!kernel_state()->xam_state()->IsUserSignedIn(user_index)) {
@@ -894,27 +945,34 @@ dword_result_t XamUserGetUserFlags_entry(dword_t user_index) {
 DECLARE_XAM_EXPORT1(XamUserGetUserFlags, kUserProfiles, kImplemented);
 
 dword_result_t XamUserGetUserFlagsFromXUID_entry(qword_t xuid) {
-  if (!kernel_state()->xam_state()->IsUserSignedIn(xuid)) {
+  const auto& user_profile = kernel_state()->xam_state()->GetUserProfile(xuid);
+  if (!user_profile) {
     return 0;
   }
-
-  const auto& user_profile = kernel_state()->xam_state()->GetUserProfile(xuid);
 
   return user_profile->GetCachedFlags();
 }
 DECLARE_XAM_EXPORT1(XamUserGetUserFlagsFromXUID, kUserProfiles, kImplemented);
 
 dword_result_t XamUserGetOnlineLanguageFromXUID_entry(qword_t xuid) {
-  /* Notes:
-     - Calls XamUserGetUserFlagsFromXUID and returns (ulonglong)(cached_flag <<
-     0x20) >> 0x39 & 0x1f;
-     - XamUserGetMembershipTierFromXUID and XamUserGetOnlineCountryFromXUID also
-     call it
-     - Removed in metro
-  */
-  return cvars::user_language;
+  const auto& user = kernel_state()->xam_state()->GetUserProfile(xuid);
+  if (!user) {
+    return cvars::user_language;
+  }
+  return user->GetLanguage();
 }
-DECLARE_XAM_EXPORT1(XamUserGetOnlineLanguageFromXUID, kUserProfiles, kStub);
+DECLARE_XAM_EXPORT1(XamUserGetOnlineLanguageFromXUID, kUserProfiles,
+                    kImplemented);
+
+dword_result_t XamUserGetOnlineCountryFromXUID_entry(qword_t xuid) {
+  const auto& user = kernel_state()->xam_state()->GetUserProfile(xuid);
+  if (!user) {
+    return cvars::user_country;
+  }
+  return user->GetCountry();
+}
+DECLARE_XAM_EXPORT1(XamUserGetOnlineCountryFromXUID, kUserProfiles,
+                    kImplemented);
 
 constexpr uint8_t kStatsMaxAmount = 64;
 
@@ -960,6 +1018,45 @@ dword_result_t XamUserCreateStatsEnumerator_entry(
   return X_ERROR_SUCCESS;
 }
 DECLARE_XAM_EXPORT1(XamUserCreateStatsEnumerator, kUserProfiles, kSketchy);
+
+dword_result_t XamUserGetUserTenure_entry(dword_t user_index,
+                                          lpdword_t tenure_level_ptr,
+                                          lpdword_t milestone_ptr,
+                                          lpqword_t milestone_date_ptr,
+                                          dword_t overlap_ptr) {
+  if (!kernel_state()->xam_state()->IsUserSignedIn(user_index)) {
+    return X_E_INVALIDARG;
+  }
+
+  const auto& user_profile =
+      kernel_state()->xam_state()->GetUserProfile(user_index);
+
+  if (const auto setting =
+          kernel_state()->xam_state()->user_tracker()->GetSetting(
+              user_profile, kDashboardID,
+              static_cast<uint32_t>(UserSettingId::XPROFILE_TENURE_LEVEL))) {
+    *tenure_level_ptr = std::get<int32_t>(setting->get_host_data());
+  }
+
+  if (const auto setting =
+          kernel_state()->xam_state()->user_tracker()->GetSetting(
+              user_profile, kDashboardID,
+              static_cast<uint32_t>(
+                  UserSettingId::XPROFILE_TENURE_MILESTONE))) {
+    *milestone_ptr = std::get<int32_t>(setting->get_host_data());
+  }
+
+  if (const auto setting =
+          kernel_state()->xam_state()->user_tracker()->GetSetting(
+              user_profile, kDashboardID,
+              static_cast<uint32_t>(
+                  UserSettingId::XPROFILE_TENURE_NEXT_MILESTONE_DATE))) {
+    *milestone_date_ptr = std::get<int64_t>(setting->get_host_data());
+  }
+
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamUserGetUserTenure, kUserProfiles, kImplemented);
 
 }  // namespace xam
 }  // namespace kernel

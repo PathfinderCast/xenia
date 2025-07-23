@@ -267,7 +267,7 @@ enum class UserSettingId : uint32_t {
                  0x4F),  // 0x7008004F, named "LastOnLIVE" in Velocity
 };
 
-constexpr static std::array<UserSettingId, 104> known_settings = {
+inline constexpr std::array<UserSettingId, 104> known_settings = {
     UserSettingId::XPROFILE_PERMISSIONS,
     UserSettingId::XPROFILE_GAMER_TYPE,
     UserSettingId::XPROFILE_GAMER_YAXIS_INVERSION,
@@ -374,12 +374,12 @@ constexpr static std::array<UserSettingId, 104> known_settings = {
     UserSettingId::XPROFILE_LAST_LIVE_SIGNIN,
 };
 
-const static std::set<UserSettingId> title_writable_settings = {
+inline const std::set<UserSettingId> title_writable_settings = {
     UserSettingId::XPROFILE_TITLE_SPECIFIC1,
     UserSettingId::XPROFILE_TITLE_SPECIFIC2,
     UserSettingId::XPROFILE_TITLE_SPECIFIC3};
 
-enum PREFERRED_COLOR_OPTIONS : uint32_t {
+enum PREFERRED_COLOR_OPTIONS : uint8_t {
   PREFERRED_COLOR_NONE,
   PREFERRED_COLOR_BLACK,
   PREFERRED_COLOR_WHITE,
@@ -393,10 +393,60 @@ enum PREFERRED_COLOR_OPTIONS : uint32_t {
   PREFERRED_COLOR_BROWN,
   PREFERRED_COLOR_SILVER
 };
+enum CONTROLLER_VIBRATION_OPTIONS : uint8_t {
+  CONTROLLER_VIBRATION_OFF = 0,
+  CONTROLLER_VIBRATION_ON = 3
+};
+
+enum CONTROL_SENSITIVITY_OPTIONS : uint8_t {
+  CONTROL_SENSITIVITY_MEDIUM = 0,
+  CONTROL_SENSITIVITY_LOW,
+  CONTROL_SENSITIVITY_HIGH
+};
+
+enum GAMER_DIFFICULTY_OPTIONS : uint8_t {
+  GAMER_DIFFICULTY_NORMAL = 0,
+  GAMER_DIFFICULTY_EASY,
+  GAMER_DIFFICULTY_HARD
+};
+
+enum AUTO_AIM_OPTIONS : uint8_t { AUTO_AIM_OFF = 0, AUTO_AIM_ON };
+
+enum AUTO_CENTER_OPTIONS : uint8_t { AUTO_CENTER_OFF = 0, AUTO_CENTER_ON };
+
+enum MOVEMENT_CONTROL_OPTIONS : uint8_t {
+  MOVEMENT_CONTROL_L_THUMBSTICK = 0,
+  MOVEMENT_CONTROL_R_THUMBSTICK
+};
+
+enum YAXIS_INVERSION_OPTIONS : uint8_t {
+  YAXIS_INVERSION_OFF = 0,
+  YAXIS_INVERSION_ON
+};
+
+enum TRANSMISSION_OPTIONS : uint8_t {
+  TRANSMISSION_AUTO = 0,
+  TRANSMISSION_MANUAL
+};
+
+enum CAMERA_LOCATION_OPTIONS : uint8_t {
+  CAMERA_LOCATION_BEHIND = 0,
+  CAMERA_LOCATION_IN_FRONT,
+  CAMERA_LOCATION_INSIDE
+};
+
+enum BRAKE_CONTROL_OPTIONS : uint8_t {
+  BRAKE_CONTROL_TRIGGER = 0,
+  BRAKE_CONTROL_BUTTON
+};
+
+enum ACCELERATOR_CONTROL_OPTIONS : uint8_t {
+  ACCELERATOR_CONTROL_TRIGGER = 0,
+  ACCELERATOR_CONTROL_BUTTON
+};
 
 class UserSetting : public UserData {
  public:
-  UserSetting(UserSetting& setting);
   UserSetting(const UserSetting& setting);
   // Ctor for writing from host
   UserSetting(UserSettingId setting_id, UserDataTypes setting_data);
